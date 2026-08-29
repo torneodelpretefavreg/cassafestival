@@ -410,7 +410,8 @@ function POS({ theme, toggleTheme }) {
   const [menu, setMenu] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(EVENT_PREFIX+"menu")||"null");
-      return (saved && saved.length) ? saved : DEFAULT_MENU;
+      // Un menu svuotato di proposito resta vuoto: solo l'assenza di dati richiama i default
+      return Array.isArray(saved) ? saved : DEFAULT_MENU;
     } catch { return DEFAULT_MENU; }
   });
 
@@ -2022,18 +2023,23 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
         let nextId = Math.max(0, ...menu.map(i => i.id)) + 1;
         const nuovi = [];
         const scartati = [];
-        let gia = 0;
+        const sconosciute = {};   // categorie del file che non esistono in cassa
+        const duplicati = [];     // nomi già presenti, non toccati
 
         rows.forEach((row, idx) => {
           const nome = String(row[kNom]||"").trim();
           if (!nome) return;
           const riga = idx + 2; // +2 = intestazione + base 1
           const cat = CAT_ALIAS[normalize(row[kCat])];
-          if (!cat) { scartati.push("riga " + riga + " (" + nome + "): categoria non valida"); return; }
+          if (!cat) { sconosciute[String(row[kCat]||"(vuota)").trim()] = (sconosciute[String(row[kCat]||"(vuota)").trim()]||0)+1; return; }
           const prezzo = parseFloat(String(row[kPrz]).replace(/[^0-9,.-]/g,"").replace(",","."));
           if (isNaN(prezzo) || prezzo < 0) { scartati.push("riga " + riga + " (" + nome + "): prezzo non valido"); return; }
           const chiave = normalize(nome);
-          if (esistenti.has(chiave)) { gia++; return; }   // ← già in cassa: non si tocca
+          if (esistenti.has(chiave)) {                       // ← già in cassa: non si tocca
+            const vecchio = menu.find(i => normalize(i.name) === chiave);
+            duplicati.push(nome + (vecchio ? " (già in «" + vecchio.cat + "»)" : ""));
+            return;
+          }
           esistenti.add(chiave);
           const item = { id: nextId++, name: nome, price: prezzo, cat };
           const opz = String(row[kOpz]||"").split(/[|;\n]/).map(v=>v.trim()).filter(Boolean);
@@ -2041,14 +2047,27 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
           nuovi.push(item);
         });
 
-        if (!nuovi.length && !scartati.length) {
-          alert("Nessun articolo nuovo: le " + gia + " voci del file sono già presenti in cassa (invariate).");
+        const listaSconosciute = Object.keys(sconosciute);
+        if (listaSconosciute.length) {
+          alert(
+            "CATEGORIE NON RICONOSCIUTE\n\n" +
+            listaSconosciute.map(c => "· " + c + " (" + sconosciute[c] + " righe)").join("\n") +
+            "\n\nL'importazione non crea categorie nuove: creale prima in 🍔 Articoli → " +
+            "Centri di costo, dentro il centro giusto, poi ricarica il file.\n\n" +
+            "Categorie attualmente valide:\n" + CATEGORIE.join(", ")
+          );
+          if (!nuovi.length) return;
+        }
+        if (!nuovi.length && !scartati.length && duplicati.length) {
+          alert("Nessun articolo nuovo: le " + duplicati.length + " voci del file sono già presenti in cassa (invariate).\n\n" +
+                duplicati.slice(0,15).map(d=>"· "+d).join("\n"));
           return;
         }
         const riepilogo =
           "IMPORTAZIONE MENU\n\n" +
           "✅ Nuovi articoli da aggiungere: " + nuovi.length + "\n" +
-          "🔒 Già presenti, lasciati invariati: " + gia + "\n" +
+          "🔒 Già presenti, lasciati invariati: " + duplicati.length + "\n" +
+          (duplicati.length ? duplicati.slice(0,10).map(d=>"   · "+d).join("\n") + (duplicati.length>10?"\n   ...":"") + "\n" : "") +
           (scartati.length ? "⚠️ Righe scartate: " + scartati.length + "\n\n" + scartati.slice(0,10).join("\n") + (scartati.length>10 ? "\n..." : "") + "\n" : "") +
           (nuovi.length ? "\nConfermi l'aggiunta?" : "\nNessun articolo da aggiungere.");
         if (!nuovi.length) { alert(riepilogo); return; }
@@ -2175,6 +2194,14 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
             </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}}
               onChange={e=>{ importMenuExcel(e.target.files[0]); e.target.value=""; }} />
+            <button onClick={()=>{
+              if (!menu.length) { alert("Il menu è già vuoto."); return; }
+              if (window.confirm("Eliminare tutti i " + menu.length + " articoli del menu?\n\nI centri di costo e le categorie restano come sono.\nServe per partire da zero prima di importare un listino da Excel."))
+                saveMenu([]);
+            }} title="Elimina tutti gli articoli, utile prima di importare un listino nuovo"
+              style={{background:"#7f1d1d",border:"none",color:"#fca5a5",padding:"10px 18px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>
+              🧹 Svuota menu
+            </button>
             <button onClick={startAdd} style={{background:"#dc2626",border:"none",color:"#fff",padding:"10px 18px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>
               ➕ Nuovo Articolo
             </button>
@@ -2222,6 +2249,51 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
           </div>
         ) : null
       ))}
+
+      {(() => {
+        // Articoli rimasti in categorie che nessun centro possiede: invisibili nelle
+        // liste qui sopra, ma ancora nel menu — bloccano l'import per nome e non
+        // finiscono su nessuno scontrino. Vanno riassegnati o eliminati.
+        const orfane = {};
+        menu.forEach(i => { if (!CATEGORIE.includes(i.cat)) (orfane[i.cat] = orfane[i.cat] || []).push(i); });
+        const catsOrfane = Object.keys(orfane);
+        if (!catsOrfane.length) return null;
+        const totale = catsOrfane.reduce((n,c)=>n+orfane[c].length, 0);
+        return (
+          <div style={{background:"#3f1d1d",border:"1px solid #7f1d1d",borderRadius:12,padding:16,marginBottom:12}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#fecaca",marginBottom:6}}>
+              ⚠️ {totale} articoli senza centro di costo
+            </div>
+            <div style={{fontSize:12,color:"#fca5a5",marginBottom:12,lineHeight:1.5}}>
+              Appartengono a categorie che non fanno più parte di nessun centro (di solito
+              il listino del torneo rimasto dopo aver rifatto i centri). Non compaiono in
+              cassa, ma occupano i nomi: un articolo con lo stesso nome non può essere
+              importato da Excel. Assegna la categoria a un centro oppure elimina gli articoli.
+            </div>
+            {catsOrfane.map(cat => (
+              <div key={cat} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderTop:"1px solid #7f1d1d",flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:150,fontSize:13,color:"#fee2e2",fontWeight:600}}>
+                  {cat} <span style={{fontWeight:400,color:"#fca5a5"}}>· {orfane[cat].length} articoli</span>
+                  <div style={{fontSize:11,color:"#fca5a5",marginTop:2}}>
+                    {orfane[cat].slice(0,4).map(i=>i.name).join(", ")}{orfane[cat].length>4 ? "…" : ""}
+                  </div>
+                </div>
+                <select value="" onChange={e=>{ if(!e.target.value) return;
+                    saveCentri(centri.map(c => c.id===e.target.value ? {...c, cats:[...c.cats, cat]} : c)); }}
+                  style={{...inputStyle,width:"auto",padding:"6px 8px",fontSize:12,cursor:"pointer"}}>
+                  <option value="">Assegna a…</option>
+                  {centri.map(c => <option key={c.id} value={c.id}>{etichetta(c)}</option>)}
+                </select>
+                <button onClick={()=>{ if(window.confirm("Eliminare i "+orfane[cat].length+" articoli della categoria «"+cat+"»?"))
+                    saveMenu(menu.filter(i => i.cat !== cat)); }}
+                  style={{background:"#7f1d1d",border:"1px solid #b91c1c",color:"#fca5a5",padding:"7px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>
+                  🗑 Elimina
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       <div style={{textAlign:"center",marginTop:8,marginBottom:20}}>
         <button onClick={()=>{ if(window.confirm("Ripristinare il menu originale? Tutte le modifiche andranno perse.")) saveMenu(DEFAULT_MENU); }}
