@@ -1930,7 +1930,9 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
 
   const CAT_ALIAS = {};
   CATEGORIE.forEach(c => { CAT_ALIAS[normalize(c)] = c; });
-  Object.assign(CAT_ALIAS, {
+  // Sinonimi comodi (si può scrivere "Panini" o "Bibite" senza emoji). Valgono
+  // solo se la categoria di destinazione esiste ancora nei centri di costo.
+  const ALIAS = {
     panino:"🥪 Panini", panini:"🥪 Panini", cibo:"🥪 Panini",
     fritti:"🍟 Fritti", fritto:"🍟 Fritti", fritture:"🍟 Fritti",
     extra:"🍕 Extra", extras:"🍕 Extra",
@@ -1938,17 +1940,29 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
     analc:"🥤 Analc.", analcolici:"🥤 Analc.", analcolico:"🥤 Analc.", bibite:"🥤 Analc.", bibita:"🥤 Analc.", soft:"🥤 Analc.",
     alcolici:"🍺 Alcolici", alcolico:"🍺 Alcolici", birre:"🍺 Alcolici", cocktail:"🍺 Alcolici", drink:"🍺 Alcolici", drinks:"🍺 Alcolici",
     shot:"🥃 Shot", shots:"🥃 Shot", shottini:"🥃 Shot",
+  };
+  Object.keys(ALIAS).forEach(k => {
+    if (CATEGORIE.includes(ALIAS[k]) && !CAT_ALIAS[k]) CAT_ALIAS[k] = ALIAS[k];
+  });
+  // Il nome del centro vale come scorciatoia se ha una sola categoria (es. "Gelateria")
+  centri.forEach(cen => {
+    if (cen.cats.length === 1) {
+      const k = normalize(cen.nome);
+      if (!CAT_ALIAS[k]) CAT_ALIAS[k] = cen.cats[0];
+    }
   });
 
   // Scarica un template vuoto già impostato con le categorie valide
   const downloadTemplate = () => {
-    const rows = [
-      ["Categoria","Articolo","Prezzo","Opzioni"],
-      ["🥪 Panini","Panino Porchetta","6,00",""],
-      ["🍟 Fritti","Patatine Grandi","4,00",""],
-      ["🍺 Alcolici","Gin Tonic","6,00","Gin Bombay | Gin Malfy | Gin Hendricks"],
-      ["🥤 Analc.","Acqua Naturale","1,00",""],
+    // Esempi costruiti sulle categorie realmente configurate in questo momento
+    const esempi = [
+      ["Articolo di esempio 1","6,00",""],
+      ["Articolo di esempio 2","4,00",""],
+      ["Articolo di esempio 3","5,00","Variante A | Variante B"],
     ];
+    const rows = [["Categoria","Articolo","Prezzo","Opzioni"]].concat(
+      esempi.map((e,i) => [CATEGORIE[i % CATEGORIE.length] || "", e[0], e[1], e[2]])
+    );
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{wch:16},{wch:34},{wch:10},{wch:46}];
     const guida = XLSX.utils.aoa_to_sheet([
@@ -1958,7 +1972,10 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
       ["2. Categoria: usa una di quelle elencate qui sotto (le emoji non sono obbligatorie)."],
       ["3. Prezzo: in euro, con virgola o punto (es. 4,50 oppure 4.50). Senza il simbolo €."],
       ["4. Opzioni: varianti selezionabili in cassa, separate dalla barra verticale |. Lascia vuoto se non servono."],
-      ["5. Salva il file e caricalo con «Importa da Excel»."],
+      ["5. Cancella le righe di esempio, salva e carica il file con «Importa da Excel»."],
+      [""],
+      ["Le categorie qui sotto sono quelle configurate ORA nella cassa: se aggiungi o togli"],
+      ["un centro di costo da «Articoli», riscarica il template per averlo aggiornato."],
       [""],
       ["ATTENZIONE: gli articoli già presenti in cassa NON vengono modificati."],
       ["Se un nome esiste già, la riga viene saltata. Prezzi e opzioni si cambiano a mano dalla cassa."],
