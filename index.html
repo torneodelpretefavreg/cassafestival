@@ -294,6 +294,10 @@ const DEFAULT_RCPT = {
   nomeRichiesto:  "cibo"      // "sempre" | "cibo" | "mai"
 };
 
+// Metodi di pagamento accettati in cassa. "omaggio" è a costo zero: lo scontrino
+// e la comanda escono come sempre, ma il valore non entra nell'incasso.
+const PAGAMENTI = [["contanti","💵"],["satispay","📲"],["carta","💳"],["omaggio","🎁"]];
+const isOmaggio = o => String(o && o.pay).toLowerCase() === "omaggio";
 const fmt = n => "€" + n.toFixed(2);
 let rcptN = parseInt(localStorage.getItem(EVENT_PREFIX+"rcpt_n") || "1");
 
@@ -874,15 +878,17 @@ function POS({ theme, toggleTheme }) {
     return Object.keys(set).sort((a,b) => key(b) - key(a));
   }, [orders]);
 
-  const { scopeO, scopeRev, totalRev, payBreak, topItems } = React.useMemo(() => {
+  const { scopeO, scopeRev, totalRev, payBreak, topItems, omaggi, omaggiVal } = React.useMemo(() => {
     const inScope = reportDay==="all" ? orders : orders.filter(o=>o.date && o.date.startsWith(reportDay));
-    const _scopeRev = inScope.reduce((s,o)=>s+(o.total||0),0);
-    const _totalRev = orders.reduce((s,o)=>s+(o.total||0),0);
+    const _scopeRev = inScope.filter(o=>!isOmaggio(o)).reduce((s,o)=>s+(o.total||0),0);
+    const _totalRev = orders.filter(o=>!isOmaggio(o)).reduce((s,o)=>s+(o.total||0),0);
     const _payBreak = inScope.reduce((a,o)=>{a[o.pay]=(a[o.pay]||0)+(o.total||0);return a;},{});
+    const _omaggi   = inScope.filter(isOmaggio);
+    const _omaggiVal= _omaggi.reduce((s,o)=>s+(o.total||0),0);
     const _topItems = Object.entries(
       inScope.flatMap(o=>o.items||[]).reduce((a,i)=>{a[i.name]=(a[i.name]||0)+i.qty;return a;},{})
     ).sort((a,b)=>b[1]-a[1]).slice(0,5);
-    return { scopeO:inScope, scopeRev:_scopeRev, totalRev:_totalRev, payBreak:_payBreak, topItems:_topItems };
+    return { scopeO:inScope, scopeRev:_scopeRev, totalRev:_totalRev, payBreak:_payBreak, topItems:_topItems, omaggi:_omaggi, omaggiVal:_omaggiVal };
   }, [orders, reportDay]);
 
   const exportExcel = () => {
@@ -897,7 +903,10 @@ function POS({ theme, toggleTheme }) {
       ["Giornata",             reportDay==="all" ? "Tutte le giornate" : reportDay],
       ["Incasso giornata (€)", Number(scopeRev.toFixed(2))],
       ["Scontrini giornata",   scopeO.length],
-      ["Scontrino medio (€)",  scopeO.length ? Number((scopeRev/scopeO.length).toFixed(2)) : 0],
+      ["Scontrino medio (€)",  scopeO.filter(o=>!isOmaggio(o)).length ? Number((scopeRev/scopeO.filter(o=>!isOmaggio(o)).length).toFixed(2)) : 0],
+      [],
+      ["Omaggi giornata (€)",  Number(omaggiVal.toFixed(2))],
+      ["Scontrini omaggio",    omaggi.length],
       [],
       ["Incasso totale " + EVT.nomeLungo + " (€)", Number(totalRev.toFixed(2))],
       ["Scontrini totali " + EVT.nomeLungo,   orders.length],
@@ -1131,7 +1140,7 @@ function POS({ theme, toggleTheme }) {
                   </div>
                   {/* Payment methods */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                    {[["contanti","💵"],["carta","💳"],["pos","📱"],["ticket","🎫"]].map(([m,ic])=>(
+                    {PAGAMENTI.map(([m,ic])=>(
                       <button key={m} onClick={()=>setPay(m)} style={{background:pay===m?"#991b1b":"#1e293b",border:`2px solid ${pay===m?"#dc2626":"#334155"}`,color:pay===m?"#fff":"#94a3b8",padding:"10px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,textTransform:"capitalize"}}>
                         {ic} {m}
                       </button>
@@ -1200,7 +1209,7 @@ function POS({ theme, toggleTheme }) {
           </div>
           {/* Stat cards */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-            {[[reportDay==="all"?"Incasso":"Giornata",fmt(scopeRev),scopeO.length+" scontrini"],["Media",scopeO.length?fmt(scopeRev/scopeO.length):"€0.00","per scontrino"],[EVT.totaleLabel,fmt(totalRev),orders.length+" scontrini"]].map(([l,v,s])=>(
+            {[[reportDay==="all"?"Incasso":"Giornata",fmt(scopeRev),scopeO.filter(o=>!isOmaggio(o)).length+" scontrini"],["Omaggi",fmt(omaggiVal),omaggi.length+" scontrini"],["Media",scopeO.filter(o=>!isOmaggio(o)).length?fmt(scopeRev/scopeO.filter(o=>!isOmaggio(o)).length):"€0.00","per scontrino"],[EVT.totaleLabel,fmt(totalRev),orders.length+" scontrini"]].map(([l,v,s])=>(
               <div key={l} style={{background:"#1e293b",borderRadius:10,padding:"12px 14px",border:"1px solid #334155",gridColumn:l===EVT.totaleLabel?"span 2":"auto"}}>
                 <div style={{fontSize:11,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>{l}</div>
                 <div style={{fontSize:22,fontWeight:900,color:"#4ade80"}}>{v}</div>
@@ -1390,7 +1399,7 @@ function POS({ theme, toggleTheme }) {
               {disc>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:14}}><span style={{color:"#f87171"}}>Sconto -{disc}%</span><span style={{color:"#f87171"}}>−{fmt(discAmt)}</span></div>}
               <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:22,fontWeight:900,color:"#4ade80",margin:"8px 0"}}><span>TOTALE</span><span>{fmt(total)}</span></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,margin:"10px 0"}}>
-                {[["contanti","💵"],["carta","💳"],["pos","📱"],["ticket","🎫"]].map(([m,ic])=>(
+                {PAGAMENTI.map(([m,ic])=>(
                   <button key={m} onClick={()=>setPay(m)} style={{background:pay===m?"#991b1b":"#1e293b",border:`1px solid ${pay===m?"#dc2626":"#334155"}`,color:pay===m?"#fff":"#94a3b8",padding:"7px 4px",borderRadius:8,cursor:"pointer",fontSize:12,fontFamily:"inherit",textTransform:"capitalize"}}>{ic} {m}</button>
                 ))}
               </div>
@@ -1445,8 +1454,8 @@ function POS({ theme, toggleTheme }) {
               <button onClick={exportExcel} style={{background:"#15803d",border:"1px solid #16a34a",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📥 Scarica Excel</button>
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:24}}>
-            {[[reportDay==="all"?"Incasso totale":"Incasso giornata",fmt(scopeRev),scopeO.length+" scontrini"],["Scontrino medio",scopeO.length?fmt(scopeRev/scopeO.length):"€0.00","media"],[EVT.totaleLabel,fmt(totalRev),orders.length+" scontrini totali"]].map(([l,v,s])=>(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
+            {[[reportDay==="all"?"Incasso totale":"Incasso giornata",fmt(scopeRev),scopeO.filter(o=>!isOmaggio(o)).length+" scontrini"],["Omaggi",fmt(omaggiVal),omaggi.length+" scontrini"],["Scontrino medio",scopeO.filter(o=>!isOmaggio(o)).length?fmt(scopeRev/scopeO.filter(o=>!isOmaggio(o)).length):"€0.00","media"],[EVT.totaleLabel,fmt(totalRev),orders.length+" scontrini totali"]].map(([l,v,s])=>(
               <div key={l} style={{background:"#1e293b",borderRadius:12,padding:20,border:"1px solid #334155"}}>
                 <div style={{fontSize:12,color:"#64748b",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>{l}</div>
                 <div style={{fontSize:28,fontWeight:900,color:"#4ade80"}}>{v}</div>
