@@ -861,11 +861,36 @@ function POS({ theme, toggleTheme }) {
     setView(isMobile ? "carrello" : "cassa");
   };
 
-  const CATS = React.useMemo(() => ["Tutti", ...CATEGORIE.filter(c => menu.some(i => i.cat === c))], [menu, CATEGORIE]);
-  const filtered = React.useMemo(
-    () => menu.filter(i=>(cat==="Tutti"||i.cat===cat)&&i.name.toLowerCase().includes(search.toLowerCase())),
-    [menu, cat, search]
-  );
+  /* Filtro a due livelli: prima i centri di costo (pochi tasti grandi), poi,
+     solo se il centro ha più categorie, la riga delle sue categorie.
+     cat vale "Tutti" | "c:<idCentro>" | "<nome categoria>" */
+  const centriConArticoli = React.useMemo(
+    () => centri.filter(c => menu.some(i => c.cats.includes(i.cat))), [centri, menu]);
+  const centroSelezionato = React.useMemo(() => {
+    if (String(cat).startsWith("c:")) return centri.find(c => c.id === String(cat).slice(2)) || null;
+    return centri.find(c => c.cats.includes(cat)) || null;
+  }, [cat, centri]);
+  const sottoCategorie = React.useMemo(() => {
+    if (!centroSelezionato) return [];
+    const usate = centroSelezionato.cats.filter(c => menu.some(i => i.cat === c));
+    return usate.length > 1 ? usate : [];
+  }, [centroSelezionato, menu]);
+  const filtered = React.useMemo(() => {
+    const q = search.toLowerCase();
+    return menu.filter(i => {
+      if (!i.name.toLowerCase().includes(q)) return false;
+      if (cat === "Tutti") return true;
+      if (String(cat).startsWith("c:")) {
+        const c = centri.find(x => x.id === String(cat).slice(2));
+        return c ? c.cats.includes(i.cat) : false;
+      }
+      return i.cat === cat;
+    });
+  }, [menu, cat, search, centri]);
+  // Se il centro selezionato sparisce (rinominato o eliminato), torna a "Tutti"
+  useEffect(() => {
+    if (cat !== "Tutti" && !centroSelezionato && !menu.some(i => i.cat === cat)) setCat("Tutti");
+  }, [centri, menu]);
 
   const today = new Date().toLocaleDateString("it-IT");
   const [reportDay, setReportDay] = useState(today); // giornata selezionata nel report ("all" = tutte)
@@ -1079,12 +1104,30 @@ function POS({ theme, toggleTheme }) {
               </div>
               {/* Category pills */}
               <div style={{display:"flex",gap:6,padding:"0 10px 8px",overflowX:"auto",flexShrink:0,scrollbarWidth:"none"}}>
-                {CATS.map(c=>(
-                  <button key={c} onClick={()=>setCat(c)} style={{background:cat===c?"#dc2626":"#1e293b",border:`1px solid ${cat===c?"#dc2626":"#334155"}`,color:cat===c?"#fff":"#94a3b8",padding:"7px 14px",borderRadius:20,cursor:"pointer",fontSize:12,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
-                    {c}
-                  </button>
-                ))}
+                <button onClick={()=>setCat("Tutti")} style={{background:cat==="Tutti"?"#dc2626":"#1e293b",border:`1px solid ${cat==="Tutti"?"#dc2626":"#334155"}`,color:cat==="Tutti"?"#fff":"#94a3b8",padding:"8px 14px",borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                  🔍 Tutti
+                </button>
+                {centriConArticoli.map(c=>{
+                  const on = centroSelezionato && centroSelezionato.id === c.id;
+                  return (
+                    <button key={c.id} onClick={()=>setCat("c:"+c.id)} style={{background:on?"#dc2626":"#1e293b",border:`1px solid ${on?"#dc2626":"#334155"}`,color:on?"#fff":"#94a3b8",padding:"8px 14px",borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                      <span style={{fontSize:15,marginRight:5}}>{c.emoji}</span>{c.nome}
+                    </button>
+                  );
+                })}
               </div>
+              {sottoCategorie.length > 0 && (
+                <div style={{display:"flex",gap:6,padding:"0 10px 8px",overflowX:"auto",flexShrink:0,scrollbarWidth:"none"}}>
+                  <button onClick={()=>setCat("c:"+centroSelezionato.id)} style={{background:String(cat).startsWith("c:")?"#7f1d1d":"transparent",border:"1px solid #334155",color:String(cat).startsWith("c:")?"#fff":"#64748b",padding:"5px 12px",borderRadius:16,cursor:"pointer",fontSize:11,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                    Tutto {centroSelezionato.nome}
+                  </button>
+                  {sottoCategorie.map(sc=>(
+                    <button key={sc} onClick={()=>setCat(sc)} style={{background:cat===sc?"#7f1d1d":"transparent",border:`1px solid ${cat===sc?"#dc2626":"#334155"}`,color:cat===sc?"#fff":"#64748b",padding:"5px 12px",borderRadius:16,cursor:"pointer",fontSize:11,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                      {sc}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* Product grid */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"0 10px 10px",overflowY:"auto",flex:1,minHeight:0}}>
                 {filtered.map(item=>(
@@ -1357,8 +1400,24 @@ function POS({ theme, toggleTheme }) {
           <div style={{flex:1,display:"flex",flexDirection:"column",padding:16,overflow:"hidden",borderRight:"1px solid #1e293b",gap:10}}>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cerca prodotto..." style={{width:"100%",background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"8px 14px",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none"}} />
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {CATS.map(c=><button key={c} onClick={()=>setCat(c)} style={{background:cat===c?"#dc2626":"#1e293b",border:`1px solid ${cat===c?"#dc2626":"#334155"}`,color:cat===c?"#fff":"#94a3b8",padding:"4px 12px",borderRadius:20,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{c}</button>)}
+              <button onClick={()=>setCat("Tutti")} style={{background:cat==="Tutti"?"#dc2626":"#1e293b",border:`1px solid ${cat==="Tutti"?"#dc2626":"#334155"}`,color:cat==="Tutti"?"#fff":"#94a3b8",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>🔍 Tutti</button>
+              {centriConArticoli.map(c=>{
+                const on = centroSelezionato && centroSelezionato.id === c.id;
+                return (
+                  <button key={c.id} onClick={()=>setCat("c:"+c.id)} style={{background:on?"#dc2626":"#1e293b",border:`1px solid ${on?"#dc2626":"#334155"}`,color:on?"#fff":"#94a3b8",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                    <span style={{fontSize:15,marginRight:5}}>{c.emoji}</span>{c.nome}
+                  </button>
+                );
+              })}
             </div>
+            {sottoCategorie.length > 0 && (
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <button onClick={()=>setCat("c:"+centroSelezionato.id)} style={{background:String(cat).startsWith("c:")?"#7f1d1d":"transparent",border:"1px solid #334155",color:String(cat).startsWith("c:")?"#fff":"#64748b",padding:"4px 12px",borderRadius:16,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>Tutto {centroSelezionato.nome}</button>
+                {sottoCategorie.map(sc=>(
+                  <button key={sc} onClick={()=>setCat(sc)} style={{background:cat===sc?"#7f1d1d":"transparent",border:`1px solid ${cat===sc?"#dc2626":"#334155"}`,color:cat===sc?"#fff":"#64748b",padding:"4px 12px",borderRadius:16,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>{sc}</button>
+                ))}
+              </div>
+            )}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10,overflowY:"auto",flex:1}}>
               {filtered.map(item=>(
                 <button key={item.id} onClick={()=>addItem(item)} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"14px 10px",cursor:"pointer",textAlign:"center",color:"#e2e8f0",fontFamily:"inherit"}}>
@@ -2000,6 +2059,10 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
     XLSX.writeFile(wb, "template_menu_festival.xlsx");
   };
 
+  // Quando il file contiene categorie che la cassa non conosce, l'import non si
+  // blocca: si apre un pannello per abbinarle a un centro esistente o crearne uno.
+  const [mapping, setMapping] = React.useState(null); // {righe, ignote, scelte}
+
   const importMenuExcel = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -2028,66 +2091,107 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
           return;
         }
 
-        const esistenti = new Set(menu.map(i => normalize(i.name)));
-        let nextId = Math.max(0, ...menu.map(i => i.id)) + 1;
-        const nuovi = [];
-        const scartati = [];
-        const sconosciute = {};   // categorie del file che non esistono in cassa
-        const duplicati = [];     // nomi già presenti, non toccati
-
+        // Prima passata: legge tutto, senza scartare le categorie sconosciute
+        const righe = [];
+        const ignote = [];
         rows.forEach((row, idx) => {
           const nome = String(row[kNom]||"").trim();
           if (!nome) return;
-          const riga = idx + 2; // +2 = intestazione + base 1
-          const cat = CAT_ALIAS[normalize(row[kCat])];
-          if (!cat) { sconosciute[String(row[kCat]||"(vuota)").trim()] = (sconosciute[String(row[kCat]||"(vuota)").trim()]||0)+1; return; }
-          const prezzo = parseFloat(String(row[kPrz]).replace(/[^0-9,.-]/g,"").replace(",","."));
-          if (isNaN(prezzo) || prezzo < 0) { scartati.push("riga " + riga + " (" + nome + "): prezzo non valido"); return; }
-          const chiave = normalize(nome);
-          if (esistenti.has(chiave)) {                       // ← già in cassa: non si tocca
-            const vecchio = menu.find(i => normalize(i.name) === chiave);
-            duplicati.push(nome + (vecchio ? " (già in «" + vecchio.cat + "»)" : ""));
-            return;
-          }
-          esistenti.add(chiave);
-          const item = { id: nextId++, name: nome, price: prezzo, cat };
-          const opz = String(row[kOpz]||"").split(/[|;\n]/).map(v=>v.trim()).filter(Boolean);
-          if (opz.length) item.variants = opz;
-          nuovi.push(item);
+          const catRaw = String(row[kCat]||"").trim();
+          const cat = CAT_ALIAS[normalize(catRaw)] || null;
+          if (!cat && catRaw && !ignote.some(x => normalize(x) === normalize(catRaw))) ignote.push(catRaw);
+          righe.push({
+            riga: idx + 2, nome, catRaw, cat,
+            prezzo: parseFloat(String(row[kPrz]).replace(/[^0-9,.-]/g,"").replace(",",".")),
+            opz: String(row[kOpz]||"").split(/[|;\n]/).map(v=>v.trim()).filter(Boolean),
+          });
         });
 
-        const listaSconosciute = Object.keys(sconosciute);
-        if (listaSconosciute.length) {
-          alert(
-            "CATEGORIE NON RICONOSCIUTE\n\n" +
-            listaSconosciute.map(c => "· " + c + " (" + sconosciute[c] + " righe)").join("\n") +
-            "\n\nL'importazione non crea categorie nuove: creale prima in 🍔 Articoli → " +
-            "Centri di costo, dentro il centro giusto, poi ricarica il file.\n\n" +
-            "Categorie attualmente valide:\n" + CATEGORIE.join(", ")
-          );
-          if (!nuovi.length) return;
-        }
-        if (!nuovi.length && !scartati.length && duplicati.length) {
-          alert("Nessun articolo nuovo: le " + duplicati.length + " voci del file sono già presenti in cassa (invariate).\n\n" +
-                duplicati.slice(0,15).map(d=>"· "+d).join("\n"));
+        if (ignote.length) {
+          // Proposta iniziale: se il nome della categoria somiglia a un centro, lo preseleziona
+          const scelte = {};
+          ignote.forEach(c => {
+            const cen = centri.find(x => normalize(x.nome) === normalize(c));
+            scelte[c] = cen ? cen.id : "__nuovo__";
+          });
+          setMapping({ righe, ignote, scelte });
           return;
         }
-        const riepilogo =
-          "IMPORTAZIONE MENU\n\n" +
-          "✅ Nuovi articoli da aggiungere: " + nuovi.length + "\n" +
-          "🔒 Già presenti, lasciati invariati: " + duplicati.length + "\n" +
-          (duplicati.length ? duplicati.slice(0,10).map(d=>"   · "+d).join("\n") + (duplicati.length>10?"\n   ...":"") + "\n" : "") +
-          (scartati.length ? "⚠️ Righe scartate: " + scartati.length + "\n\n" + scartati.slice(0,10).join("\n") + (scartati.length>10 ? "\n..." : "") + "\n" : "") +
-          (nuovi.length ? "\nConfermi l'aggiunta?" : "\nNessun articolo da aggiungere.");
-        if (!nuovi.length) { alert(riepilogo); return; }
-        if (!window.confirm(riepilogo)) return;
-        saveMenu([...menu, ...nuovi]);
-        alert("Importazione completata: " + nuovi.length + " articoli aggiunti.");
+        applicaImport(righe, centri);
       } catch (err) {
         alert("Errore nella lettura del file: " + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  // Seconda passata: scrive davvero gli articoli (i doppioni restano intoccati)
+  const applicaImport = (righe, centriFinali, risolviCat) => {
+    const esistenti = new Set(menu.map(i => normalize(i.name)));
+    let nextId = Math.max(0, ...menu.map(i => i.id)) + 1;
+    const nuovi = [], scartati = [], duplicati = [];
+    let ignorate = 0;
+
+    righe.forEach(r => {
+      const cat = r.cat || (risolviCat ? risolviCat(r.catRaw) : null);
+      if (!cat) { ignorate++; return; }
+      if (isNaN(r.prezzo) || r.prezzo < 0) { scartati.push("riga " + r.riga + " (" + r.nome + "): prezzo non valido"); return; }
+      const chiave = normalize(r.nome);
+      if (esistenti.has(chiave)) {
+        const vecchio = menu.find(i => normalize(i.name) === chiave);
+        duplicati.push(r.nome + (vecchio ? " (già in «" + vecchio.cat + "»)" : ""));
+        return;
+      }
+      esistenti.add(chiave);
+      const item = { id: nextId++, name: r.nome, price: r.prezzo, cat };
+      if (r.opz.length) item.variants = r.opz;
+      nuovi.push(item);
+    });
+
+    if (!nuovi.length) {
+      alert("Nessun articolo nuovo da aggiungere.\n\n" +
+            (duplicati.length ? "🔒 Già presenti: " + duplicati.length + "\n" + duplicati.slice(0,10).map(d=>"· "+d).join("\n") + "\n" : "") +
+            (scartati.length ? "⚠️ Scartate: " + scartati.length + "\n" + scartati.slice(0,10).join("\n") + "\n" : "") +
+            (ignorate ? "⏭ Righe con categoria ignorata: " + ignorate : ""));
+      return false;
+    }
+    const riepilogo =
+      "IMPORTAZIONE MENU\n\n" +
+      "✅ Nuovi articoli da aggiungere: " + nuovi.length + "\n" +
+      (duplicati.length ? "🔒 Già presenti, lasciati invariati: " + duplicati.length + "\n" +
+        duplicati.slice(0,10).map(d=>"   · "+d).join("\n") + (duplicati.length>10?"\n   ...":"") + "\n" : "") +
+      (scartati.length ? "⚠️ Righe scartate: " + scartati.length + "\n" + scartati.slice(0,10).join("\n") + "\n" : "") +
+      (ignorate ? "⏭ Righe con categoria ignorata: " + ignorate + "\n" : "") +
+      "\nConfermi l'aggiunta?";
+    if (!window.confirm(riepilogo)) return false;
+    saveMenu([...menu, ...nuovi]);
+    alert("Importazione completata: " + nuovi.length + " articoli aggiunti.");
+    return true;
+  };
+
+  // Conferma del pannello di abbinamento: crea centri/categorie, poi importa
+  const confermaMapping = () => {
+    let nuoviCentri = centri.map(c => ({...c, cats:[...c.cats]}));
+    const risolti = {};
+    mapping.ignote.forEach(catRaw => {
+      const scelta = mapping.scelte[catRaw];
+      if (scelta === "__ignora__") return;
+      if (scelta === "__nuovo__") {
+        let id = catRaw.toLowerCase().replace(/[^a-z0-9]/g,"") || ("c"+Date.now());
+        while (nuoviCentri.some(c => c.id === id)) id += "1";
+        nuoviCentri.push({ id, nome:catRaw.toUpperCase(), emoji:"🏷", cats:[catRaw], copie:1,
+                           gruppo:id, comanda:false, stazione:catRaw, nota:false });
+      } else {
+        const cen = nuoviCentri.find(c => c.id === scelta);
+        if (!cen) return;
+        if (!cen.cats.includes(catRaw)) cen.cats.push(catRaw);
+      }
+      risolti[normalize(catRaw)] = catRaw;
+    });
+    saveCentri(nuoviCentri);
+    const ok = applicaImport(mapping.righe, nuoviCentri, raw => risolti[normalize(raw)] || null);
+    setMapping(null);
+    return ok;
   };
 
   const saveItem = () => {
@@ -2217,6 +2321,39 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
           </div>
         )}
       </div>
+
+      {mapping && (() => {
+        const setScelta = (cat, val) => setMapping(m => ({...m, scelte:{...m.scelte, [cat]: val}}));
+        const conta = cat => mapping.righe.filter(r => normalize(r.catRaw) === normalize(cat)).length;
+        return (
+          <div onClick={()=>setMapping(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:16,padding:20,maxWidth:520,width:"100%",maxHeight:"88dvh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+              <div style={{fontSize:18,fontWeight:800,color:"#f8fafc",marginBottom:6}}>🔗 Abbina le categorie</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginBottom:16,lineHeight:1.5}}>
+                Nel file ci sono categorie che la cassa non ha ancora. Dì dove metterle:
+                puoi assegnarle a un centro di costo esistente oppure creare un centro nuovo
+                con quel nome. Le righe ignorate non vengono importate.
+              </div>
+              {mapping.ignote.map(cat => (
+                <div key={cat} style={{background:"#0f172a",border:"1px solid #334155",borderRadius:10,padding:12,marginBottom:10}}>
+                  <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",marginBottom:2}}>{cat}</div>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>{conta(cat)} articoli nel file</div>
+                  <select value={mapping.scelte[cat]} onChange={e=>setScelta(cat, e.target.value)}
+                    style={{width:"100%",background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"9px 11px",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none",cursor:"pointer",boxSizing:"border-box"}}>
+                    <option value="__nuovo__">➕ Crea il centro «{cat.toUpperCase()}»</option>
+                    {centri.map(c => <option key={c.id} value={c.id}>Aggiungi a {etichetta(c)}</option>)}
+                    <option value="__ignora__">⏭ Ignora queste righe</option>
+                  </select>
+                </div>
+              ))}
+              <div style={{display:"flex",gap:10,marginTop:16}}>
+                <button onClick={()=>setMapping(null)} style={{flex:1,background:"transparent",border:"1px solid #334155",color:"#94a3b8",padding:"12px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>Annulla</button>
+                <button onClick={confermaMapping} style={{flex:2,background:"#15803d",border:"none",color:"#fff",padding:"12px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:15,fontWeight:700}}>✓ Abbina e importa</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {adding && formJSX}
 
