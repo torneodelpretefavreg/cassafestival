@@ -887,6 +887,27 @@ function POS({ theme, toggleTheme }) {
       return i.cat === cat;
     });
   }, [menu, cat, search, centri]);
+  /* La griglia non è mai un elenco piatto: con "Tutti" gli articoli sono divisi
+     per centro di costo, dentro un centro sono divisi per categoria. Solo la
+     ricerca testuale e la singola categoria mostrano una lista semplice. */
+  const gruppiGriglia = React.useMemo(() => {
+    if (search.trim()) return [{ key:"search", titolo:null, items:filtered }];
+    if (cat === "Tutti") {
+      const out = centri
+        .map(c => ({ key:c.id, titolo:etichetta(c), items:filtered.filter(i => c.cats.includes(i.cat)) }))
+        .filter(g => g.items.length);
+      const coperte = new Set(catsDi(centri));
+      const resto = filtered.filter(i => !coperte.has(i.cat));
+      if (resto.length) out.push({ key:"__altro", titolo:"⚠️ Senza centro", items:resto });
+      return out;
+    }
+    if (String(cat).startsWith("c:") && centroSelezionato) {
+      const usate = centroSelezionato.cats.filter(c => filtered.some(i => i.cat === c));
+      if (usate.length > 1) return usate.map(c => ({ key:c, titolo:c, items:filtered.filter(i => i.cat === c) }));
+    }
+    return [{ key:"flat", titolo:null, items:filtered }];
+  }, [filtered, cat, centri, centroSelezionato, search]);
+
   // Se il centro selezionato sparisce (rinominato o eliminato), torna a "Tutti"
   useEffect(() => {
     if (cat !== "Tutti" && !centroSelezionato && !menu.some(i => i.cat === cat)) setCat("Tutti");
@@ -1129,12 +1150,26 @@ function POS({ theme, toggleTheme }) {
                 </div>
               )}
               {/* Product grid */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,padding:"0 10px 10px",overflowY:"auto",flex:1,minHeight:0}}>
-                {filtered.map(item=>(
-                  <button key={item.id} onClick={()=>addItem(item)} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:12,padding:"14px 8px",cursor:"pointer",textAlign:"center",color:"#e2e8f0",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:72,active:{background:"#dc2626"}}}>
-                    <div style={{fontSize:12,fontWeight:700,lineHeight:1.25,color:"#f1f5f9"}}>{item.name}</div>
-                    <div style={{fontSize:16,color:"#f87171",fontWeight:900,marginTop:3}}>{fmt(item.price)}</div>
-                  </button>
+              <div style={{padding:"0 10px 10px",overflowY:"auto",flex:1,minHeight:0}}>
+                {!filtered.length && <div style={{textAlign:"center",color:"#475569",padding:"30px 0",fontSize:14}}>Nessun articolo</div>}
+                {gruppiGriglia.map(g=>(
+                  <div key={g.key} style={{marginBottom:14}}>
+                    {g.titolo && (
+                      <div style={{display:"flex",alignItems:"center",gap:8,margin:"6px 2px 8px"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:"#94a3b8",letterSpacing:0.4,whiteSpace:"nowrap"}}>{g.titolo}</div>
+                        <div style={{flex:1,height:1,background:"#1e293b"}}/>
+                        <div style={{fontSize:11,color:"#475569"}}>{g.items.length}</div>
+                      </div>
+                    )}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                      {g.items.map(item=>(
+                        <button key={item.id} onClick={()=>addItem(item)} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:12,padding:"14px 8px",cursor:"pointer",textAlign:"center",color:"#e2e8f0",fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:72}}>
+                          <div style={{fontSize:12,fontWeight:700,lineHeight:1.25,color:"#f1f5f9"}}>{item.name}</div>
+                          <div style={{fontSize:16,color:"#f87171",fontWeight:900,marginTop:3}}>{fmt(item.price)}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1418,12 +1453,26 @@ function POS({ theme, toggleTheme }) {
                 ))}
               </div>
             )}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10,overflowY:"auto",flex:1}}>
-              {filtered.map(item=>(
-                <button key={item.id} onClick={()=>addItem(item)} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"14px 10px",cursor:"pointer",textAlign:"center",color:"#e2e8f0",fontFamily:"inherit"}}>
-                  <div style={{fontSize:12,fontWeight:600,marginBottom:6,lineHeight:1.3}}>{item.name}</div>
-                  <div style={{fontSize:15,color:"#f87171",fontWeight:800}}>{fmt(item.price)}</div>
-                </button>
+            <div style={{overflowY:"auto",flex:1}}>
+              {!filtered.length && <div style={{textAlign:"center",color:"#475569",padding:"40px 0",fontSize:15}}>Nessun articolo</div>}
+              {gruppiGriglia.map(g=>(
+                <div key={g.key} style={{marginBottom:18}}>
+                  {g.titolo && (
+                    <div style={{display:"flex",alignItems:"center",gap:10,margin:"4px 2px 10px"}}>
+                      <div style={{fontSize:13,fontWeight:800,color:"#94a3b8",letterSpacing:0.4,whiteSpace:"nowrap"}}>{g.titolo}</div>
+                      <div style={{flex:1,height:1,background:"#1e293b"}}/>
+                      <div style={{fontSize:11,color:"#475569"}}>{g.items.length}</div>
+                    </div>
+                  )}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
+                    {g.items.map(item=>(
+                      <button key={item.id} onClick={()=>addItem(item)} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"14px 10px",cursor:"pointer",textAlign:"center",color:"#e2e8f0",fontFamily:"inherit"}}>
+                        <div style={{fontSize:12,fontWeight:600,marginBottom:6,lineHeight:1.3}}>{item.name}</div>
+                        <div style={{fontSize:15,color:"#f87171",fontWeight:800}}>{fmt(item.price)}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -1800,9 +1849,10 @@ function CucinaView({ comande, toggleComandaItem, evadiComanda, consegnaScontrin
   );
 }
 
-function CentriManager({ menu, centri, saveCentri, isMobile }) {
-  const [edit, setEdit] = React.useState(null);   // id del centro aperto
+function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
+  const [edit, setEdit] = React.useState(null);      // id del centro aperto
   const [nuovaCat, setNuovaCat] = React.useState("");
+  const [riempi, setRiempi] = React.useState(null);  // categoria in cui si stanno mettendo articoli
   const C = { bg:"#1e293b", border:"#334155", input:"#0f172a", text:"#e2e8f0", muted:"#94a3b8" };
   const inputStyle = { background:C.input, border:"1px solid "+C.border, color:C.text, padding:"9px 11px",
                        borderRadius:8, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%", boxSizing:"border-box" };
@@ -1913,18 +1963,61 @@ function CentriManager({ menu, centri, saveCentri, isMobile }) {
                 </button>
 
                 <div style={{fontSize:12,color:C.muted,fontWeight:700,marginBottom:6}}>Categorie del menu</div>
-                {cen.cats.map(cat => (
-                  <div key={cat} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+C.border,flexWrap:"wrap"}}>
-                    <div style={{flex:1,fontSize:13,color:C.text}}>{cat}
-                      <span style={{color:C.muted,fontSize:11}}> · {menu.filter(i=>i.cat===cat).length} art.</span>
+                {cen.cats.map(cat => {
+                  const dentro = menu.filter(i => i.cat === cat);
+                  const aperta = riempi === cat;
+                  // Candidati da aggiungere: tutto il resto del menu, prima gli articoli dello stesso centro
+                  const fuori = menu.filter(i => i.cat !== cat)
+                    .sort((a,b) => (cen.cats.includes(b.cat)?1:0) - (cen.cats.includes(a.cat)?1:0));
+                  return (
+                  <div key={cat} style={{borderBottom:"1px solid "+C.border,padding:"6px 0"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:120,fontSize:13,color:C.text,fontWeight:600}}>{cat}
+                        <span style={{color:C.muted,fontSize:11,fontWeight:400}}> · {dentro.length} art.</span>
+                      </div>
+                      <button onClick={()=>setRiempi(aperta?null:cat)} style={{...btn(aperta?"#334155":"#15803d"),padding:"5px 10px",fontSize:12}}>
+                        {aperta ? "Chiudi" : "➕ Articoli"}
+                      </button>
+                      <select value={cen.id} onChange={e=>spostaCat(cat, e.target.value)}
+                        style={{...inputStyle,width:"auto",padding:"5px 8px",fontSize:12,cursor:"pointer"}}>
+                        {centri.map(x => <option key={x.id} value={x.id}>{etichetta(x)}</option>)}
+                      </select>
+                      <button onClick={()=>eliminaCat(cen, cat)} style={{...btn("#7f1d1d"),color:"#fca5a5",padding:"5px 10px"}}>🗑</button>
                     </div>
-                    <select value={cen.id} onChange={e=>spostaCat(cat, e.target.value)}
-                      style={{...inputStyle,width:"auto",padding:"5px 8px",fontSize:12,cursor:"pointer"}}>
-                      {centri.map(x => <option key={x.id} value={x.id}>{etichetta(x)}</option>)}
-                    </select>
-                    <button onClick={()=>eliminaCat(cen, cat)} style={{...btn("#7f1d1d"),color:"#fca5a5",padding:"5px 10px"}}>🗑</button>
+
+                    {aperta && (
+                      <div style={{marginTop:8,marginBottom:6,background:"#0b1220",border:"1px solid "+C.border,borderRadius:8,padding:10}}>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:6,fontWeight:700}}>Dentro «{cat}» ({dentro.length})</div>
+                        {!dentro.length && <div style={{fontSize:12,color:"#475569",marginBottom:8}}>Ancora vuota: aggiungi gli articoli dall'elenco qui sotto.</div>}
+                        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:dentro.length?10:0}}>
+                          {dentro.map(i => {
+                            // Si può togliere solo se il centro ha un'altra categoria dove metterlo
+                            const altra = cen.cats.find(c => c !== cat);
+                            return (
+                              <button key={i.id} onClick={()=>{ if(altra) saveMenu(menu.map(x=>x.id===i.id?{...x,cat:altra}:x)); }}
+                                title={altra ? "Sposta in «"+altra+"»" : "Unica categoria del centro: spostalo da un'altra categoria o dalla lista articoli"}
+                                style={{background:"#14532d",border:"1px solid #15803d",color:"#bbf7d0",padding:"5px 10px",borderRadius:14,cursor:altra?"pointer":"default",fontFamily:"inherit",fontSize:12,opacity:altra?1:0.75}}>
+                                {i.name}{altra ? " ✕" : ""}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:6,fontWeight:700}}>Aggiungi un articolo</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:6,maxHeight:200,overflowY:"auto"}}>
+                          {!fuori.length && <div style={{fontSize:12,color:"#475569"}}>Nessun altro articolo nel menu.</div>}
+                          {fuori.map(i => (
+                            <button key={i.id} onClick={()=>saveMenu(menu.map(x=>x.id===i.id?{...x,cat}:x))}
+                              title={"Ora in «"+i.cat+"»"}
+                              style={{background:C.input,border:"1px solid "+C.border,color:C.muted,padding:"5px 10px",borderRadius:14,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                              ＋ {i.name} <span style={{color:"#475569",fontSize:10}}>({i.cat})</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
                 <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
                   <input value={nuovaCat} onChange={e=>setNuovaCat(e.target.value)} placeholder="Nuova categoria (es. 🍦 Gelati)"
                     style={{...inputStyle,flex:1,minWidth:160}}
@@ -1963,6 +2056,12 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
     });
   };
   const cancel = () => { setEditing(null); setAdding(false); };
+
+  // Sposta un articolo in un'altra categoria (utile per smistare un import in blocco)
+  const cambiaCategoria = (item, nuovaCat) => {
+    if (!nuovaCat || nuovaCat === item.cat) return;
+    saveMenu(menu.map(i => i.id === item.id ? {...i, cat: nuovaCat} : i));
+  };
 
   // Esporta il menu corrente (con prezzi aggiornati) in un file Excel
   const exportMenuExcel = () => {
@@ -2358,16 +2457,16 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
       {adding && formJSX}
 
       {!adding && !editing && (
-        <CentriManager menu={menu} centri={centri} saveCentri={saveCentri} isMobile={isMobile} />
+        <CentriManager menu={menu} saveMenu={saveMenu} centri={centri} saveCentri={saveCentri} isMobile={isMobile} />
       )}
 
       {CATEGORIE.map(catName => (
         byCat[catName].length > 0 || true ? (
           <div key={catName} style={{background:C.bg,borderRadius:12,padding:16,border:"1px solid "+C.border,marginBottom:12}}>
-            <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",marginBottom:10,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               {catName}
               <span style={{fontSize:11,color:C.muted,fontWeight:400}}>
-                ({centroLabel(catName)})
+                ({centroLabel(catName)}) · {byCat[catName].length} articoli
               </span>
             </div>
             {byCat[catName].length === 0 && (
@@ -2386,6 +2485,14 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
                         </div>
                       )}
                     </div>
+                    <select value={item.cat} onChange={e=>cambiaCategoria(item, e.target.value)} title="Sposta in un'altra categoria"
+                      style={{background:C.input,border:"1px solid "+C.border,color:C.muted,padding:"6px 8px",borderRadius:7,fontSize:12,fontFamily:"inherit",outline:"none",cursor:"pointer",maxWidth:150}}>
+                      {centri.map(cen => (
+                        <optgroup key={cen.id} label={etichetta(cen)}>
+                          {cen.cats.map(c => <option key={c} value={c}>{c}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
                     <button onClick={()=>startEdit(item)} title="Modifica" style={{background:"#1d4ed8",border:"none",color:"#fff",padding:"7px 12px",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:600}}>✏️</button>
                     <button onClick={()=>deleteItem(item)} title="Elimina" style={{background:"#7f1d1d",border:"none",color:"#fca5a5",padding:"7px 12px",borderRadius:7,cursor:"pointer",fontSize:13}}>🗑</button>
                   </div>
