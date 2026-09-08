@@ -214,12 +214,7 @@ const DEFAULT_MENU = [
      gruppo    = centri con lo stesso gruppo finiscono su UN UNICO scontrino
      comanda   = se manda la comanda al display cucina, e a quale stazione
      nota      = se all'aggiunta a carrello chiede una nota (es. pizze) */
-const DEFAULT_CENTRI = [
-  { id:"cibo",   nome:"CIBO",   emoji:"🍕", cats:["🥪 Panini","🍕 Extra"],           copie:1, gruppo:"cibo",   comanda:true,  stazione:"🍽 Cucina", nota:false },
-  { id:"fritti", nome:"FRITTI", emoji:"🍟", cats:["🍟 Fritti"],                      copie:1, gruppo:"fritti", comanda:true,  stazione:"🍽 Cucina", nota:false },
-  { id:"pizza",  nome:"PIZZA",  emoji:"🍕", cats:["🍕 Pizza"],                       copie:1, gruppo:"pizza",  comanda:true,  stazione:"🍕 Pizza",  nota:true  },
-  { id:"bar",    nome:"BAR",    emoji:"🍺", cats:["🥤 Analc.","🍺 Alcolici","🥃 Shot"], copie:1, gruppo:"bar",    comanda:false, stazione:"🍹 Bar",    nota:false },
-];
+const DEFAULT_CENTRI = [];
 
 // Normalizza la configurazione salvata (protegge da dati vecchi o incompleti)
 const fixCentri = (arr) => {
@@ -1874,15 +1869,14 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
   };
 
   const eliminaCentro = (cen) => {
-    if (centri.length <= 1) { alert("Deve restare almeno un centro di costo."); return; }
     const altri = centri.filter(c => c.id !== cen.id);
-    if (!cen.cats.length) {
+    if (!cen.cats.length || !altri.length) {
       if (!window.confirm("Eliminare il centro " + etichetta(cen) + "?")) return;
       saveCentri(altri);
       if (edit === cen.id) setEdit(null);
       return;
     }
-    // Ha delle categorie: si sceglie a quale centro passano, non si decide da soli
+    // Ha delle categorie e restano altri centri: si sceglie a quale passano
     setSpostaCentro({ cen, dest: altri[0].id });
   };
 
@@ -2640,10 +2634,14 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
         );
       })()}
 
-      <div style={{textAlign:"center",marginTop:8,marginBottom:20}}>
+      <div style={{textAlign:"center",marginTop:8,marginBottom:20,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
         <button onClick={()=>{ if(window.confirm("Ripristinare il menu originale? Tutte le modifiche andranno perse.")) saveMenu(DEFAULT_MENU); }}
           style={{background:"transparent",border:"1px solid "+C.border,color:C.muted,padding:"8px 16px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
           ↺ Ripristina menu originale
+        </button>
+        <button onClick={()=>{ if(window.confirm("Svuotare completamente il menu? Verranno eliminati tutti i "+menu.length+" articoli, per ripartire da zero.")) saveMenu([]); }}
+          style={{background:"transparent",border:"1px solid #b91c1c",color:"#fca5a5",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+          🗑 Svuota menu
         </button>
       </div>
     </div>
