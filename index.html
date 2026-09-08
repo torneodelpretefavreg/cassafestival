@@ -1854,6 +1854,7 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
   const [nuovaCat, setNuovaCat] = React.useState("");
   const [riempi, setRiempi] = React.useState(null);  // categoria in cui si stanno mettendo articoli
   const [svuota, setSvuota] = React.useState(null);  // categoria piena in attesa di essere eliminata
+  const [spostaCentro, setSpostaCentro] = React.useState(null); // centro con categorie in attesa di essere eliminato
   const C = { bg:"#1e293b", border:"#334155", input:"#0f172a", text:"#e2e8f0", muted:"#94a3b8" };
   const inputStyle = { background:C.input, border:"1px solid "+C.border, color:C.text, padding:"9px 11px",
                        borderRadius:8, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%", boxSizing:"border-box" };
@@ -1875,14 +1876,22 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
   const eliminaCentro = (cen) => {
     if (centri.length <= 1) { alert("Deve restare almeno un centro di costo."); return; }
     const altri = centri.filter(c => c.id !== cen.id);
-    const conArticoli = cen.cats.filter(cat => menu.some(i => i.cat === cat));
-    let msg = "Eliminare il centro " + etichetta(cen) + "?";
-    if (cen.cats.length) msg += "\n\nLe sue categorie (" + cen.cats.join(", ") + ") passeranno a " + etichetta(altri[0]) + ".";
-    if (conArticoli.length) msg += "\nGli articoli restano dove sono, cambia solo il reparto di stampa.";
-    if (!window.confirm(msg)) return;
-    const nuovi = altri.map((c,idx) => idx===0 ? {...c, cats:[...c.cats, ...cen.cats]} : c);
-    saveCentri(nuovi);
+    if (!cen.cats.length) {
+      if (!window.confirm("Eliminare il centro " + etichetta(cen) + "?")) return;
+      saveCentri(altri);
+      if (edit === cen.id) setEdit(null);
+      return;
+    }
+    // Ha delle categorie: si sceglie a quale centro passano, non si decide da soli
+    setSpostaCentro({ cen, dest: altri[0].id });
+  };
+
+  const confermaEliminaCentro = () => {
+    const { cen, dest } = spostaCentro;
+    saveCentri(centri.filter(c => c.id !== cen.id)
+      .map(c => c.id === dest ? {...c, cats:[...c.cats, ...cen.cats]} : c));
     if (edit === cen.id) setEdit(null);
+    setSpostaCentro(null);
   };
 
   const spostaCat = (cat, versoId) => {
@@ -1923,6 +1932,29 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
 
   return (
     <div style={{background:C.bg,borderRadius:12,padding:isMobile?14:18,border:"1px solid "+C.border,marginBottom:16}}>
+      {spostaCentro && (
+        <div onClick={()=>setSpostaCentro(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#1e293b",border:"1px solid "+C.border,borderRadius:16,padding:20,maxWidth:460,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+            <div style={{fontSize:17,fontWeight:800,color:"#f8fafc",marginBottom:6}}>Eliminare {etichetta(spostaCentro.cen)}</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:14,lineHeight:1.5}}>
+              Questo centro contiene {spostaCentro.cen.cats.length} categorie
+              ({spostaCentro.cen.cats.join(", ")}). Scegli a quale centro passano:
+              gli articoli restano dove sono, cambia solo il reparto di stampa.
+            </div>
+            <select value={spostaCentro.dest} onChange={e=>setSpostaCentro({...spostaCentro, dest:e.target.value})}
+              style={{...inputStyle, cursor:"pointer", marginBottom:16}}>
+              {centri.filter(c => c.id !== spostaCentro.cen.id).map(c => (
+                <option key={c.id} value={c.id}>{etichetta(c)}</option>
+              ))}
+            </select>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setSpostaCentro(null)} style={{flex:1,background:"transparent",border:"1px solid "+C.border,color:C.muted,padding:"12px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>Annulla</button>
+              <button onClick={confermaEliminaCentro} style={{flex:2,background:"#b91c1c",border:"none",color:"#fff",padding:"12px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:15,fontWeight:700}}>Elimina il centro</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {svuota && (
         <div onClick={()=>setSvuota(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#1e293b",border:"1px solid "+C.border,borderRadius:16,padding:20,maxWidth:460,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
