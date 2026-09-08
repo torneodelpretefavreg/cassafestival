@@ -1853,6 +1853,7 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
   const [edit, setEdit] = React.useState(null);      // id del centro aperto
   const [nuovaCat, setNuovaCat] = React.useState("");
   const [riempi, setRiempi] = React.useState(null);  // categoria in cui si stanno mettendo articoli
+  const [svuota, setSvuota] = React.useState(null);  // categoria piena in attesa di essere eliminata
   const C = { bg:"#1e293b", border:"#334155", input:"#0f172a", text:"#e2e8f0", muted:"#94a3b8" };
   const inputStyle = { background:C.input, border:"1px solid "+C.border, color:C.text, padding:"9px 11px",
                        borderRadius:8, fontSize:14, fontFamily:"inherit", outline:"none", width:"100%", boxSizing:"border-box" };
@@ -1891,10 +1892,25 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
     }));
   };
 
+  // Eliminare una categoria piena è lecito: si decide solo dove finiscono i suoi articoli
   const eliminaCat = (cen, cat) => {
-    const usati = menu.filter(i => i.cat === cat).length;
-    if (usati) { alert("Non puoi togliere «"+cat+"»: ci sono ancora "+usati+" articoli in questa categoria.\nSpostali o eliminali prima."); return; }
-    patch(cen.id, { cats: cen.cats.filter(x => x !== cat) });
+    const dentro = menu.filter(i => i.cat === cat);
+    if (!dentro.length) {
+      if (window.confirm("Eliminare la categoria «"+cat+"»?")) patch(cen.id, { cats: cen.cats.filter(x => x !== cat) });
+      return;
+    }
+    const altre = catsDi(centri).filter(c => c !== cat);
+    setSvuota({ cen, cat, n: dentro.length, dest: altre[0] || "__elimina__" });
+  };
+
+  // Toglie la categoria dal centro e sistema i suoi articoli come scelto
+  const confermaEliminaCat = () => {
+    const { cen, cat, dest } = svuota;
+    saveMenu(dest === "__elimina__" ? menu.filter(i => i.cat !== cat)
+                                    : menu.map(i => i.cat === cat ? {...i, cat: dest} : i));
+    saveCentri(centri.map(c => c.id === cen.id ? {...c, cats: c.cats.filter(x => x !== cat)} : c));
+    if (riempi === cat) setRiempi(null);
+    setSvuota(null);
   };
 
   const aggiungiCat = (cen) => {
@@ -1907,6 +1923,35 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
 
   return (
     <div style={{background:C.bg,borderRadius:12,padding:isMobile?14:18,border:"1px solid "+C.border,marginBottom:16}}>
+      {svuota && (
+        <div onClick={()=>setSvuota(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#1e293b",border:"1px solid "+C.border,borderRadius:16,padding:20,maxWidth:460,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+            <div style={{fontSize:17,fontWeight:800,color:"#f8fafc",marginBottom:6}}>Eliminare «{svuota.cat}»</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:14,lineHeight:1.5}}>
+              Ci sono {svuota.n} articoli in questa categoria. Scegli dove spostarli:
+              la categoria sparisce, gli articoli no.
+            </div>
+            <select value={svuota.dest} onChange={e=>setSvuota({...svuota, dest:e.target.value})}
+              style={{...inputStyle, cursor:"pointer", marginBottom:16}}>
+              {centri.map(c => {
+                const opzioni = c.cats.filter(x => x !== svuota.cat);
+                return opzioni.length ? (
+                  <optgroup key={c.id} label={etichetta(c)}>
+                    {opzioni.map(x => <option key={x} value={x}>{x}</option>)}
+                  </optgroup>
+                ) : null;
+              })}
+              <option value="__elimina__">🗑 Elimina anche i {svuota.n} articoli</option>
+            </select>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setSvuota(null)} style={{flex:1,background:"transparent",border:"1px solid "+C.border,color:C.muted,padding:"12px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>Annulla</button>
+              <button onClick={confermaEliminaCat} style={{flex:2,background:svuota.dest==="__elimina__"?"#b91c1c":"#15803d",border:"none",color:"#fff",padding:"12px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:15,fontWeight:700}}>
+                {svuota.dest==="__elimina__" ? "🗑 Elimina categoria e articoli" : "✓ Sposta ed elimina la categoria"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:6}}>
         <div style={{fontSize:isMobile?15:17,fontWeight:800,color:"#f8fafc"}}>🏭 Centri di costo</div>
         <button onClick={aggiungiCentro} style={btn("#0f766e")}>➕ Nuovo centro</button>
