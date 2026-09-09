@@ -10,6 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <!-- SheetJS for real Excel .xlsx export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -1010,6 +1012,64 @@ function POS({ theme, toggleTheme }) {
     XLSX.writeFile(wb, "report_festival_" + dateStr + ".xlsx");
   };
 
+  const exportPDF = () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const dateStr = today.replace(/\//g, "-");
+    const giorno = reportDay==="all" ? "Tutte le giornate" : reportDay;
+    const scontrinoMedio = scopeO.filter(o=>!isOmaggio(o)).length
+      ? scopeRev / scopeO.filter(o=>!isOmaggio(o)).length : 0;
+
+    doc.setFontSize(16); doc.setFont(undefined,"bold");
+    doc.text("Report " + EVT.titoloScontrino, 14, 16);
+    doc.setFontSize(9); doc.setFont(undefined,"normal"); doc.setTextColor(100);
+    doc.text("Generato il " + new Date().toLocaleString("it-IT"), 14, 22);
+    doc.setTextColor(0);
+
+    doc.autoTable({
+      startY: 28,
+      head: [["Riepilogo — " + giorno, ""]],
+      body: [
+        ["Incasso giornata",  fmt(scopeRev)],
+        ["Scontrini giornata", String(scopeO.length)],
+        ["Scontrino medio",   fmt(scontrinoMedio)],
+        ["Omaggi giornata",   fmt(omaggiVal) + " (" + omaggi.length + " scontrini)"],
+        ["Incasso totale " + EVT.nomeLungo, fmt(totalRev)],
+        ["Scontrini totali " + EVT.nomeLungo, String(orders.length)],
+      ],
+      theme: "grid", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:10}, margin:{left:14,right:14},
+    });
+
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [["Metodo di pagamento", "Totale"]],
+      body: Object.entries(payBreak).map(([m,v]) => [m, fmt(v)]),
+      theme: "grid", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:10}, margin:{left:14,right:14},
+    });
+
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [["Top prodotti", "Quantità venduta"]],
+      body: topItems.map(([name,qty]) => [name, String(qty)]),
+      theme: "grid", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:10}, margin:{left:14,right:14},
+    });
+
+    doc.addPage();
+    doc.setFontSize(13); doc.setFont(undefined,"bold");
+    doc.text("Elenco scontrini — " + giorno, 14, 16);
+    doc.autoTable({
+      startY: 22,
+      head: [["N.", "Data", "Nome", "Centro", "Pagamento", "Sconto %", "Totale"]],
+      body: [...scopeO].reverse().map(o => [
+        String(o.id).padStart(4,"0"), o.date, o.table || "-", o.centro || "-",
+        o.pay, String(o.disc || 0), fmt(o.total),
+      ]),
+      theme: "striped", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:8}, margin:{left:14,right:14},
+    });
+
+    doc.save("report_festival_" + dateStr + ".pdf");
+  };
+
   // Modale per inserire una nota libera sulla pizza (condivisa mobile + desktop)
   const noteModalJSX = noteItem && (
     <div onClick={()=>{setNoteItem(null);setNoteText("");}} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -1272,6 +1332,7 @@ function POS({ theme, toggleTheme }) {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div style={{fontSize:18,fontWeight:900,color:"#f8fafc"}}>📊 Report</div>
             <button onClick={exportExcel} style={{background:"#15803d",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📥 Excel</button>
+            <button onClick={exportPDF} style={{background:"#b91c1c",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📄 PDF</button>
           </div>
           {/* Selettore giornata */}
           <div style={{marginBottom:14}}>
@@ -1427,7 +1488,7 @@ function POS({ theme, toggleTheme }) {
 
       {view==="cassa"&&(
         <div style={{display:"flex",flex:1,height:"calc(100vh - 57px)",overflow:"hidden"}}>
-          <div style={{flex:1,display:"flex",flexDirection:"column",padding:16,overflow:"hidden",borderRight:"1px solid #1e293b",gap:10}}>
+          <div style={{flex:1,display:"flex",flexDirection:"column",padding:16,overflow:"hidden",minHeight:0,borderRight:"1px solid #1e293b",gap:10}}>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cerca prodotto..." style={{width:"100%",background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"8px 14px",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none"}} />
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <button onClick={()=>setCat("Tutti")} style={{background:cat==="Tutti"?"#dc2626":"#1e293b",border:`1px solid ${cat==="Tutti"?"#dc2626":"#334155"}`,color:cat==="Tutti"?"#fff":"#94a3b8",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>🔍 Tutti</button>
@@ -1448,7 +1509,7 @@ function POS({ theme, toggleTheme }) {
                 ))}
               </div>
             )}
-            <div style={{overflowY:"auto",flex:1}}>
+            <div style={{overflowY:"auto",flex:1,minHeight:0}}>
               {!filtered.length && <div style={{textAlign:"center",color:"#475569",padding:"40px 0",fontSize:15}}>Nessun articolo</div>}
               {gruppiGriglia.map(g=>(
                 <div key={g.key} style={{marginBottom:18}}>
@@ -1555,6 +1616,7 @@ function POS({ theme, toggleTheme }) {
                 {reportDays.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
               <button onClick={exportExcel} style={{background:"#15803d",border:"1px solid #16a34a",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📥 Scarica Excel</button>
+              <button onClick={exportPDF} style={{background:"#b91c1c",border:"1px solid #dc2626",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📄 Scarica PDF</button>
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
