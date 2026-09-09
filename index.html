@@ -2806,12 +2806,16 @@ function ScontrinoConfig({ cfg, save, reset, anteprima, centri, saveCentri, isMo
       {riga("Etichetta del nome",
         <input value={cfg.etichettaNome} onChange={e=>save({etichettaNome:e.target.value})} style={inputStyle}/>,
         "Compare come «Tavolo: Rossi» sullo scontrino.")}
-      {riga("Quando è obbligatorio il nome",
-        <select value={cfg.nomeRichiesto} onChange={e=>save({nomeRichiesto:e.target.value})} style={inputStyle}>
-          <option value="cibo">Solo se l'ordine contiene cibo</option>
-          <option value="sempre">Sempre</option>
-          <option value="mai">Mai</option>
-        </select>)}
+      {riga("Obbligo nome se l'ordine contiene cibo",
+        <button onClick={()=>save({nomeRichiesto: cfg.nomeRichiesto==="mai" ? "cibo" : "mai"})}
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,width:"100%",
+                  background:cfg.nomeRichiesto!=="mai"?"#14532d":C.input, border:"1px solid "+(cfg.nomeRichiesto!=="mai"?"#15803d":C.border),
+                  color:cfg.nomeRichiesto!=="mai"?"#bbf7d0":C.muted, padding:"10px 12px", borderRadius:8, cursor:"pointer",
+                  fontFamily:"inherit", fontSize:13, fontWeight:600, textAlign:"left"}}>
+          <span>Richiedi {String(cfg.etichettaNome||"nome").toLowerCase()} quando c'è cibo nell'ordine</span>
+          <span style={{fontSize:15}}>{cfg.nomeRichiesto!=="mai" ? "✅" : "⬜"}</span>
+        </button>,
+        "Spuntato: alla chiusura di un ordine con cibo sarà obbligatorio inserirlo. Non spuntato: resta sempre facoltativo.")}
       {riga("Riga finale 1",
         <input value={cfg.piede1} onChange={e=>save({piede1:e.target.value})} style={inputStyle}/>)}
       {riga("Riga finale 2",
