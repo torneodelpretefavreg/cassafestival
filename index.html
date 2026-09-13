@@ -10,8 +10,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <!-- SheetJS for real Excel .xlsx export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -216,7 +214,12 @@ const DEFAULT_MENU = [
      gruppo    = centri con lo stesso gruppo finiscono su UN UNICO scontrino
      comanda   = se manda la comanda al display cucina, e a quale stazione
      nota      = se all'aggiunta a carrello chiede una nota (es. pizze) */
-const DEFAULT_CENTRI = [];
+const DEFAULT_CENTRI = [
+  { id:"cibo",   nome:"CIBO",   emoji:"🍕", cats:["🥪 Panini","🍕 Extra"],           copie:1, gruppo:"cibo",   comanda:true,  stazione:"🍽 Cucina", nota:false },
+  { id:"fritti", nome:"FRITTI", emoji:"🍟", cats:["🍟 Fritti"],                      copie:1, gruppo:"fritti", comanda:true,  stazione:"🍽 Cucina", nota:false },
+  { id:"pizza",  nome:"PIZZA",  emoji:"🍕", cats:["🍕 Pizza"],                       copie:1, gruppo:"pizza",  comanda:true,  stazione:"🍕 Pizza",  nota:true  },
+  { id:"bar",    nome:"BAR",    emoji:"🍺", cats:["🥤 Analc.","🍺 Alcolici","🥃 Shot"], copie:1, gruppo:"bar",    comanda:false, stazione:"🍹 Bar",    nota:false },
+];
 
 // Normalizza la configurazione salvata (protegge da dati vecchi o incompleti)
 const fixCentri = (arr) => {
@@ -288,6 +291,7 @@ const DEFAULT_RCPT = {
   fontBase:       12,
   fontTotale:     16,
   righeVuote:     3,          // avanzamento carta prima del taglio
+  larghezza:      72,         // larghezza di stampa in mm (58 / 72 / 80 mm di rotolo)
   nomeRichiesto:  "cibo"      // "sempre" | "cibo" | "mai"
 };
 
@@ -483,6 +487,17 @@ function POS({ theme, toggleTheme }) {
     ref.on("value", handler);
     return () => ref.off("value", handler);
   }, []);
+  // La dimensione della pagina va dichiarata al sistema, altrimenti macOS stampa
+  // su A4 e lo scontrino esce minuscolo in mezzo al foglio.
+  useEffect(() => {
+    const w = Math.max(40, Math.min(110, parseInt(rcptCfg.larghezza) || 72));
+    let tag = document.getElementById("print-size");
+    if (!tag) { tag = document.createElement("style"); tag.id = "print-size"; document.head.appendChild(tag); }
+    tag.textContent =
+      "@page { size: " + w + "mm auto; margin: 0; }" +
+      "@media print { #receipt-print, html.printing-drawer #drawer-print { width: " + w + "mm !important; } }";
+  }, [rcptCfg.larghezza]);
+
   const saveRcptCfg = (patch) => {
     const merged = {...rcptCfg, ...patch};
     setRcptCfg(merged);
@@ -676,7 +691,7 @@ function POS({ theme, toggleTheme }) {
     // Uno scontrino per ogni gruppo di stampa: i centri uniti finiscono insieme
     const gruppi = gruppiDi(centri).map(g => ({
       gruppo: g.gruppo,
-      centro: labelGruppo(g.centri),
+      centro: modoSemplice ? null : labelGruppo(g.centri),
       items: cart.filter(i => g.centri.some(c => c.cats.includes(i.cat))),
     })).filter(g => g.items.length);
     // Articoli di categorie orfane (nessun centro): finiscono sul primo scontrino
@@ -861,6 +876,11 @@ function POS({ theme, toggleTheme }) {
   /* Filtro a due livelli: prima i centri di costo (pochi tasti grandi), poi,
      solo se il centro ha più categorie, la riga delle sue categorie.
      cat vale "Tutti" | "c:<idCentro>" | "<nome categoria>" */
+  // Con un solo centro di costo la suddivisione non serve a niente: la cassa
+  // torna a mostrare le sole categorie, e lo scontrino non stampa il reparto.
+  const modoSemplice = centri.length <= 1;
+  const catsConArticoli = React.useMemo(
+    () => CATEGORIE.filter(c => menu.some(i => i.cat === c)), [CATEGORIE, menu]);
   const centriConArticoli = React.useMemo(
     () => centri.filter(c => menu.some(i => c.cats.includes(i.cat))), [centri, menu]);
   const centroSelezionato = React.useMemo(() => {
@@ -889,6 +909,15 @@ function POS({ theme, toggleTheme }) {
      ricerca testuale e la singola categoria mostrano una lista semplice. */
   const gruppiGriglia = React.useMemo(() => {
     if (search.trim()) return [{ key:"search", titolo:null, items:filtered }];
+    if (cat === "Tutti" && modoSemplice) {
+      const out = catsConArticoli
+        .map(c => ({ key:c, titolo:c, items:filtered.filter(i => i.cat === c) }))
+        .filter(g => g.items.length);
+      const coperte0 = new Set(catsDi(centri));
+      const resto0 = filtered.filter(i => !coperte0.has(i.cat));
+      if (resto0.length) out.push({ key:"__altro", titolo:"⚠️ Senza categoria", items:resto0 });
+      return out.length > 1 ? out : [{ key:"flat", titolo:null, items:filtered }];
+    }
     if (cat === "Tutti") {
       const out = centri
         .map(c => ({ key:c.id, titolo:etichetta(c), items:filtered.filter(i => c.cats.includes(i.cat)) }))
@@ -903,7 +932,7 @@ function POS({ theme, toggleTheme }) {
       if (usate.length > 1) return usate.map(c => ({ key:c, titolo:c, items:filtered.filter(i => i.cat === c) }));
     }
     return [{ key:"flat", titolo:null, items:filtered }];
-  }, [filtered, cat, centri, centroSelezionato, search]);
+  }, [filtered, cat, centri, centroSelezionato, search, modoSemplice, catsConArticoli]);
 
   // Se il centro selezionato sparisce (rinominato o eliminato), torna a "Tutti"
   useEffect(() => {
@@ -1010,64 +1039,6 @@ function POS({ theme, toggleTheme }) {
     // Download .xlsx
     const dateStr = today.replace(/\//g, "-");
     XLSX.writeFile(wb, "report_festival_" + dateStr + ".xlsx");
-  };
-
-  const exportPDF = () => {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const dateStr = today.replace(/\//g, "-");
-    const giorno = reportDay==="all" ? "Tutte le giornate" : reportDay;
-    const scontrinoMedio = scopeO.filter(o=>!isOmaggio(o)).length
-      ? scopeRev / scopeO.filter(o=>!isOmaggio(o)).length : 0;
-
-    doc.setFontSize(16); doc.setFont(undefined,"bold");
-    doc.text("Report " + EVT.titoloScontrino, 14, 16);
-    doc.setFontSize(9); doc.setFont(undefined,"normal"); doc.setTextColor(100);
-    doc.text("Generato il " + new Date().toLocaleString("it-IT"), 14, 22);
-    doc.setTextColor(0);
-
-    doc.autoTable({
-      startY: 28,
-      head: [["Riepilogo — " + giorno, ""]],
-      body: [
-        ["Incasso giornata",  fmt(scopeRev)],
-        ["Scontrini giornata", String(scopeO.length)],
-        ["Scontrino medio",   fmt(scontrinoMedio)],
-        ["Omaggi giornata",   fmt(omaggiVal) + " (" + omaggi.length + " scontrini)"],
-        ["Incasso totale " + EVT.nomeLungo, fmt(totalRev)],
-        ["Scontrini totali " + EVT.nomeLungo, String(orders.length)],
-      ],
-      theme: "grid", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:10}, margin:{left:14,right:14},
-    });
-
-    doc.autoTable({
-      startY: doc.lastAutoTable.finalY + 8,
-      head: [["Metodo di pagamento", "Totale"]],
-      body: Object.entries(payBreak).map(([m,v]) => [m, fmt(v)]),
-      theme: "grid", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:10}, margin:{left:14,right:14},
-    });
-
-    doc.autoTable({
-      startY: doc.lastAutoTable.finalY + 8,
-      head: [["Top prodotti", "Quantità venduta"]],
-      body: topItems.map(([name,qty]) => [name, String(qty)]),
-      theme: "grid", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:10}, margin:{left:14,right:14},
-    });
-
-    doc.addPage();
-    doc.setFontSize(13); doc.setFont(undefined,"bold");
-    doc.text("Elenco scontrini — " + giorno, 14, 16);
-    doc.autoTable({
-      startY: 22,
-      head: [["N.", "Data", "Nome", "Centro", "Pagamento", "Sconto %", "Totale"]],
-      body: [...scopeO].reverse().map(o => [
-        String(o.id).padStart(4,"0"), o.date, o.table || "-", o.centro || "-",
-        o.pay, String(o.disc || 0), fmt(o.total),
-      ]),
-      theme: "striped", headStyles: {fillColor:[220,38,38]}, styles:{fontSize:8}, margin:{left:14,right:14},
-    });
-
-    doc.save("report_festival_" + dateStr + ".pdf");
   };
 
   // Modale per inserire una nota libera sulla pizza (condivisa mobile + desktop)
@@ -1183,7 +1154,12 @@ function POS({ theme, toggleTheme }) {
                 <button onClick={()=>setCat("Tutti")} style={{background:cat==="Tutti"?"#dc2626":"#1e293b",border:`1px solid ${cat==="Tutti"?"#dc2626":"#334155"}`,color:cat==="Tutti"?"#fff":"#94a3b8",padding:"8px 14px",borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
                   🔍 Tutti
                 </button>
-                {centriConArticoli.map(c=>{
+                {modoSemplice && catsConArticoli.map(c=>(
+                  <button key={c} onClick={()=>setCat(c)} style={{background:cat===c?"#dc2626":"#1e293b",border:`1px solid ${cat===c?"#dc2626":"#334155"}`,color:cat===c?"#fff":"#94a3b8",padding:"8px 14px",borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                    {c}
+                  </button>
+                ))}
+                {!modoSemplice && centriConArticoli.map(c=>{
                   const on = centroSelezionato && centroSelezionato.id === c.id;
                   return (
                     <button key={c.id} onClick={()=>setCat("c:"+c.id)} style={{background:on?"#dc2626":"#1e293b",border:`1px solid ${on?"#dc2626":"#334155"}`,color:on?"#fff":"#94a3b8",padding:"8px 14px",borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
@@ -1192,7 +1168,7 @@ function POS({ theme, toggleTheme }) {
                   );
                 })}
               </div>
-              {sottoCategorie.length > 0 && (
+              {!modoSemplice && sottoCategorie.length > 0 && (
                 <div style={{display:"flex",gap:6,padding:"0 10px 8px",overflowX:"auto",flexShrink:0,scrollbarWidth:"none"}}>
                   <button onClick={()=>setCat("c:"+centroSelezionato.id)} style={{background:String(cat).startsWith("c:")?"#7f1d1d":"transparent",border:"1px solid #334155",color:String(cat).startsWith("c:")?"#fff":"#64748b",padding:"5px 12px",borderRadius:16,cursor:"pointer",fontSize:11,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
                     Tutto {centroSelezionato.nome}
@@ -1332,7 +1308,6 @@ function POS({ theme, toggleTheme }) {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div style={{fontSize:18,fontWeight:900,color:"#f8fafc"}}>📊 Report</div>
             <button onClick={exportExcel} style={{background:"#15803d",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📥 Excel</button>
-            <button onClick={exportPDF} style={{background:"#b91c1c",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📄 PDF</button>
           </div>
           {/* Selettore giornata */}
           <div style={{marginBottom:14}}>
@@ -1488,11 +1463,14 @@ function POS({ theme, toggleTheme }) {
 
       {view==="cassa"&&(
         <div style={{display:"flex",flex:1,height:"calc(100vh - 57px)",overflow:"hidden"}}>
-          <div style={{flex:1,display:"flex",flexDirection:"column",padding:16,overflow:"hidden",minHeight:0,borderRight:"1px solid #1e293b",gap:10}}>
+          <div style={{flex:1,display:"flex",flexDirection:"column",padding:16,overflow:"hidden",borderRight:"1px solid #1e293b",gap:10}}>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cerca prodotto..." style={{width:"100%",background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"8px 14px",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none"}} />
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <button onClick={()=>setCat("Tutti")} style={{background:cat==="Tutti"?"#dc2626":"#1e293b",border:`1px solid ${cat==="Tutti"?"#dc2626":"#334155"}`,color:cat==="Tutti"?"#fff":"#94a3b8",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>🔍 Tutti</button>
-              {centriConArticoli.map(c=>{
+              {modoSemplice && catsConArticoli.map(c=>(
+                <button key={c} onClick={()=>setCat(c)} style={{background:cat===c?"#dc2626":"#1e293b",border:`1px solid ${cat===c?"#dc2626":"#334155"}`,color:cat===c?"#fff":"#94a3b8",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>{c}</button>
+              ))}
+              {!modoSemplice && centriConArticoli.map(c=>{
                 const on = centroSelezionato && centroSelezionato.id === c.id;
                 return (
                   <button key={c.id} onClick={()=>setCat("c:"+c.id)} style={{background:on?"#dc2626":"#1e293b",border:`1px solid ${on?"#dc2626":"#334155"}`,color:on?"#fff":"#94a3b8",padding:"6px 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
@@ -1501,7 +1479,7 @@ function POS({ theme, toggleTheme }) {
                 );
               })}
             </div>
-            {sottoCategorie.length > 0 && (
+            {!modoSemplice && sottoCategorie.length > 0 && (
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setCat("c:"+centroSelezionato.id)} style={{background:String(cat).startsWith("c:")?"#7f1d1d":"transparent",border:"1px solid #334155",color:String(cat).startsWith("c:")?"#fff":"#64748b",padding:"4px 12px",borderRadius:16,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>Tutto {centroSelezionato.nome}</button>
                 {sottoCategorie.map(sc=>(
@@ -1509,7 +1487,7 @@ function POS({ theme, toggleTheme }) {
                 ))}
               </div>
             )}
-            <div style={{overflowY:"auto",flex:1,minHeight:0}}>
+            <div style={{overflowY:"auto",flex:1}}>
               {!filtered.length && <div style={{textAlign:"center",color:"#475569",padding:"40px 0",fontSize:15}}>Nessun articolo</div>}
               {gruppiGriglia.map(g=>(
                 <div key={g.key} style={{marginBottom:18}}>
@@ -1616,7 +1594,6 @@ function POS({ theme, toggleTheme }) {
                 {reportDays.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
               <button onClick={exportExcel} style={{background:"#15803d",border:"1px solid #16a34a",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📥 Scarica Excel</button>
-              <button onClick={exportPDF} style={{background:"#b91c1c",border:"1px solid #dc2626",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📄 Scarica PDF</button>
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
@@ -1931,14 +1908,15 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
   };
 
   const eliminaCentro = (cen) => {
+    if (centri.length <= 1) { alert("Deve restare almeno un centro di costo."); return; }
     const altri = centri.filter(c => c.id !== cen.id);
-    if (!cen.cats.length || !altri.length) {
+    if (!cen.cats.length) {
       if (!window.confirm("Eliminare il centro " + etichetta(cen) + "?")) return;
       saveCentri(altri);
       if (edit === cen.id) setEdit(null);
       return;
     }
-    // Ha delle categorie e restano altri centri: si sceglie a quale passano
+    // Ha delle categorie: si sceglie a quale centro passano, non si decide da soli
     setSpostaCentro({ cen, dest: altri[0].id });
   };
 
@@ -2047,6 +2025,13 @@ function CentriManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
       <div style={{fontSize:11,color:"#64748b",marginBottom:12,lineHeight:1.5}}>
         Ogni centro raccoglie una o più categorie del menu e determina su quale scontrino
         finiscono gli articoli. Copie e raggruppamento si impostano in ⚙️ Impostazioni.
+        {centri.length <= 1 && (
+          <div style={{color:"#2dd4bf",marginTop:6,fontWeight:600}}>
+            C'è un solo centro: la cassa lavora in modo semplice, mostra solo le categorie
+            e lo scontrino non stampa il reparto. Aggiungendo un secondo centro la
+            suddivisione ricompare da sola.
+          </div>
+        )}
       </div>
 
       {centri.map(cen => {
@@ -2696,14 +2681,10 @@ function ArticoliManager({ menu, saveMenu, centri, saveCentri, isMobile }) {
         );
       })()}
 
-      <div style={{textAlign:"center",marginTop:8,marginBottom:20,display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+      <div style={{textAlign:"center",marginTop:8,marginBottom:20}}>
         <button onClick={()=>{ if(window.confirm("Ripristinare il menu originale? Tutte le modifiche andranno perse.")) saveMenu(DEFAULT_MENU); }}
           style={{background:"transparent",border:"1px solid "+C.border,color:C.muted,padding:"8px 16px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
           ↺ Ripristina menu originale
-        </button>
-        <button onClick={()=>{ if(window.confirm("Svuotare completamente il menu? Verranno eliminati tutti i "+menu.length+" articoli, per ripartire da zero.")) saveMenu([]); }}
-          style={{background:"transparent",border:"1px solid #b91c1c",color:"#fca5a5",padding:"8px 16px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
-          🗑 Svuota menu
         </button>
       </div>
     </div>
@@ -2868,16 +2849,12 @@ function ScontrinoConfig({ cfg, save, reset, anteprima, centri, saveCentri, isMo
       {riga("Etichetta del nome",
         <input value={cfg.etichettaNome} onChange={e=>save({etichettaNome:e.target.value})} style={inputStyle}/>,
         "Compare come «Tavolo: Rossi» sullo scontrino.")}
-      {riga("Obbligo nome se l'ordine contiene cibo",
-        <button onClick={()=>save({nomeRichiesto: cfg.nomeRichiesto==="mai" ? "cibo" : "mai"})}
-          style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,width:"100%",
-                  background:cfg.nomeRichiesto!=="mai"?"#14532d":C.input, border:"1px solid "+(cfg.nomeRichiesto!=="mai"?"#15803d":C.border),
-                  color:cfg.nomeRichiesto!=="mai"?"#bbf7d0":C.muted, padding:"10px 12px", borderRadius:8, cursor:"pointer",
-                  fontFamily:"inherit", fontSize:13, fontWeight:600, textAlign:"left"}}>
-          <span>Richiedi {String(cfg.etichettaNome||"nome").toLowerCase()} quando c'è cibo nell'ordine</span>
-          <span style={{fontSize:15}}>{cfg.nomeRichiesto!=="mai" ? "✅" : "⬜"}</span>
-        </button>,
-        "Spuntato: alla chiusura di un ordine con cibo sarà obbligatorio inserirlo. Non spuntato: resta sempre facoltativo.")}
+      {riga("Quando è obbligatorio il nome",
+        <select value={cfg.nomeRichiesto} onChange={e=>save({nomeRichiesto:e.target.value})} style={inputStyle}>
+          <option value="cibo">Solo se l'ordine contiene cibo</option>
+          <option value="sempre">Sempre</option>
+          <option value="mai">Mai</option>
+        </select>)}
       {riga("Riga finale 1",
         <input value={cfg.piede1} onChange={e=>save({piede1:e.target.value})} style={inputStyle}/>)}
       {riga("Riga finale 2",
@@ -2887,9 +2864,31 @@ function ScontrinoConfig({ cfg, save, reset, anteprima, centri, saveCentri, isMo
         {riga("Testo (px)",    <input type="number" min="9" max="18" value={cfg.fontBase}   onChange={num("fontBase",9,18)}   style={inputStyle}/>)}
         {riga("Totale (px)",   <input type="number" min="10" max="26" value={cfg.fontTotale} onChange={num("fontTotale",10,26)} style={inputStyle}/>)}
         {riga("Righe finali",  <input type="number" min="0" max="10" value={cfg.righeVuote} onChange={num("righeVuote",0,10)} style={inputStyle}/>, "Avanzamento carta")}
+        {riga("Larghezza carta",
+          <select value={cfg.larghezza||72} onChange={e=>save({larghezza:parseInt(e.target.value)})} style={{...inputStyle,cursor:"pointer"}}>
+            <option value="48">Rotolo 58 mm</option>
+            <option value="72">Rotolo 80 mm</option>
+            <option value="80">Rotolo 80 mm (pieno)</option>
+          </select>,
+          "Deve corrispondere al rotolo montato")}
       </div>
 
       {toggle("autoStampa",      "Stampa automatica alla chiusura ordine")}
+
+      <div style={{background:C.input,border:"1px solid "+C.border,borderRadius:10,padding:12,marginTop:6,marginBottom:8}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#f8fafc",marginBottom:6}}>⚡️ Stampa senza finestra di dialogo</div>
+        <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.6}}>
+          Chrome può stampare al volo sulla stampante predefinita, senza chiedere conferma
+          ogni volta. Chiudi <b>completamente</b> Chrome, poi aprilo dal Terminale con:
+          <div style={{background:"#000",color:"#4ade80",padding:"8px 10px",borderRadius:6,margin:"7px 0",fontFamily:"'JetBrains Mono',monospace",fontSize:11,userSelect:"all",wordBreak:"break-all"}}>
+            open -a "Google Chrome" --args --kiosk-printing
+          </div>
+          Da quella finestra apri la cassa: gli scontrini escono diretti. Prima però imposta
+          la POS-80 come stampante predefinita del Mac, e fai una stampa normale scegliendo
+          formato 72 x 210 mm e margini «Nessuno»: Chrome riusa quelle impostazioni.
+          Riaprendo Chrome in modo normale, la finestra di stampa torna come prima.
+        </div>
+      </div>
       {toggle("mostraCentro",    "Mostra il reparto (BAR / CIBO / PIZZA)")}
       {toggle("mostraData",      "Mostra data e ora")}
       {toggle("mostraNome",      "Mostra " + String(cfg.etichettaNome || "nome").toLowerCase())}
