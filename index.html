@@ -1406,7 +1406,7 @@ function POS({ theme, toggleTheme }) {
 
   /* ── DESKTOP LAYOUT (invariato) ── */
   return (
-    <div style={{minHeight:"100vh",background:"#0f172a",color:"#e2e8f0",fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
+    <div style={{height:"100vh",maxHeight:"100dvh",background:"#0f172a",color:"#e2e8f0",fontFamily:"inherit",display:"flex",flexDirection:"column",overflow:"hidden"}}>
       {/* Microstampa nascosta per apertura cassetto */}
       <div id="drawer-print" style={{position:"fixed",left:"-9999px",top:0,visibility:"hidden",textAlign:"center",fontFamily:"'JetBrains Mono','Courier New',monospace",fontSize:12,fontWeight:700}}>APERTURA CASSETTO</div>
 
@@ -1441,7 +1441,7 @@ function POS({ theme, toggleTheme }) {
       {/* MODALE NOTA PIZZA */}
       {noteModalJSX}
 
-      <nav style={{background:"#1e293b",padding:"12px 24px",display:"flex",alignItems:"center",gap:16,borderBottom:"1px solid #334155",flexWrap:"wrap"}}>
+      <nav style={{background:"#1e293b",padding:"12px 24px",display:"flex",alignItems:"center",gap:16,borderBottom:"1px solid #334155",flexWrap:"wrap",flexShrink:0}}>
         <div style={{fontSize:19,fontWeight:800,color:"#f8fafc",marginRight:8,letterSpacing:"-0.4px",display:"flex",alignItems:"center",gap:9}}><Logo size={32}/>{EVT.nomeLungo}</div>
         <div style={{display:"flex",gap:8}}>
           {[["cassa","🧾 Cassa"],["cucina","🧑‍🍳 Cucina"],["report","📊 Report"],["articoli","🍔 Articoli"],["impostazioni","⚙️ Impostazioni"]].map(([v,label])=>(
@@ -1462,7 +1462,7 @@ function POS({ theme, toggleTheme }) {
       {flash&&<div style={{position:"fixed",top:70,left:"50%",transform:"translateX(-50%)",background:"#22c55e",color:"#fff",padding:"8px 24px",borderRadius:20,fontWeight:700,zIndex:999,fontSize:14,pointerEvents:"none"}}>{flash}</div>}
 
       {view==="cassa"&&(
-        <div style={{display:"flex",flex:1,height:"calc(100vh - 57px)",overflow:"hidden"}}>
+        <div style={{display:"flex",flex:1,minHeight:0,overflow:"hidden"}}>
           <div style={{flex:1,display:"flex",flexDirection:"column",padding:16,overflow:"hidden",borderRight:"1px solid #1e293b",gap:10}}>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cerca prodotto..." style={{width:"100%",background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"8px 14px",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none"}} />
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -1532,7 +1532,7 @@ function POS({ theme, toggleTheme }) {
                 </div>
               ))}
             </div>
-            <div style={{padding:"12px 14px",borderTop:"1px solid #1e293b"}}>
+            <div style={{padding:"12px 14px",borderTop:"1px solid #1e293b",flexShrink:0,maxHeight:"70%",overflowY:"auto"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
                 <span style={{color:"#94a3b8"}}>Sconto %</span>
                 <input type="number" min="0" max="100" value={disc} onChange={e=>setDisc(Math.min(100,Math.max(0,+e.target.value)))} style={{background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"4px 8px",borderRadius:6,width:60,textAlign:"center",fontSize:14,fontFamily:"inherit",outline:"none"}} />
@@ -1560,7 +1560,7 @@ function POS({ theme, toggleTheme }) {
         const isLast = rcptIdx >= receipts.length - 1;
         const hasMultiple = receipts.length > 1;
         return (
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:32}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:32,flex:1,minHeight:0,overflowY:"auto"}}>
           {hasMultiple && (
             <div style={{display:"flex",gap:8,marginBottom:16}}>
               {receipts.map((rec,i)=>(
@@ -1585,7 +1585,7 @@ function POS({ theme, toggleTheme }) {
       })()}
 
       {view==="report"&&(
-        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",height:"calc(100vh - 57px)"}}>
+        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",flex:1,minHeight:0}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24,flexWrap:"wrap",gap:12}}>
             <h2 style={{fontSize:24,fontWeight:900,color:"#f8fafc"}}>📊 Report & Statistiche</h2>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -1659,19 +1659,19 @@ function POS({ theme, toggleTheme }) {
       )}
 
       {view==="cucina"&&(
-        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",height:"calc(100vh - 57px)"}}>
+        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",flex:1,minHeight:0}}>
           <CucinaView comande={comande} toggleComandaItem={toggleComandaItem} evadiComanda={evadiComanda} consegnaScontrino={consegnaScontrino} deleteComanda={deleteComanda} archiviaComanda={archiviaComanda} riportaInAttesa={riportaInAttesa} svuotaStorico={svuotaStorico} isMobile={false} />
         </div>
       )}
 
       {view==="articoli"&&(
-        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",height:"calc(100vh - 57px)"}}>
+        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",flex:1,minHeight:0}}>
           <ArticoliManager menu={menu} saveMenu={saveMenu} centri={centri} saveCentri={saveCentri} isMobile={false} />
         </div>
       )}
 
       {view==="impostazioni"&&(
-        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",height:"calc(100vh - 57px)"}}>
+        <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",flex:1,minHeight:0}}>
           <h2 style={{fontSize:24,fontWeight:900,marginBottom:24,color:"#f8fafc"}}>⚙️ Impostazioni</h2>
           <div style={{background:"#1e293b",borderRadius:12,padding:20,border:"1px solid #334155",marginBottom:16}}>
             <h3 style={{fontSize:15,fontWeight:700,marginBottom:14,color:"#f8fafc"}}>🖨️ Rotolo Termico 80mm</h3>
