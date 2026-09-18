@@ -529,10 +529,15 @@ function POS({ theme, toggleTheme }) {
   const [variantSel, setVariantSel] = useState([]);      // opzioni selezionate nel picker (multi-scelta)
   const [noteItem, setNoteItem] = useState(null);        // {item} - pizza per cui inserire una nota libera
   const [noteText, setNoteText] = useState("");          // testo della nota in corso di inserimento
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  /* Layout compatto (a schede, con barra fissa in basso) non solo sui
+     telefoni: anche quando la finestra del PC e' stretta o BASSA. Cosi' il
+     tasto "Incassa" resta sempre raggiungibile, qualunque sia lo zoom di
+     Chrome o la scalatura di Windows. */
+  const schermoStretto = () => window.innerWidth < 768 || window.innerHeight < 640;
+  const [isMobile, setIsMobile] = useState(schermoStretto());
 
   useEffect(() => {
-    const h = () => setIsMobile(window.innerWidth < 768);
+    const h = () => setIsMobile(schermoStretto());
     window.addEventListener("resize", h);
     return () => window.removeEventListener("resize", h);
   }, []);
@@ -950,7 +955,7 @@ function POS({ theme, toggleTheme }) {
     return Object.keys(set).sort((a,b) => key(b) - key(a));
   }, [orders]);
 
-  const { scopeO, scopeRev, totalRev, payBreak, topItems, omaggi, omaggiVal } = React.useMemo(() => {
+  const { scopeO, scopeRev, totalRev, payBreak, topItems, omaggi, omaggiVal, centriBreak } = React.useMemo(() => {
     const inScope = reportDay==="all" ? orders : orders.filter(o=>o.date && o.date.startsWith(reportDay));
     const _scopeRev = inScope.filter(o=>!isOmaggio(o)).reduce((s,o)=>s+(o.total||0),0);
     const _totalRev = orders.filter(o=>!isOmaggio(o)).reduce((s,o)=>s+(o.total||0),0);
@@ -960,8 +965,26 @@ function POS({ theme, toggleTheme }) {
     const _topItems = Object.entries(
       inScope.flatMap(o=>o.items||[]).reduce((a,i)=>{a[i.name]=(a[i.name]||0)+i.qty;return a;},{})
     ).sort((a,b)=>b[1]-a[1]).slice(0,5);
-    return { scopeO:inScope, scopeRev:_scopeRev, totalRev:_totalRev, payBreak:_payBreak, topItems:_topItems, omaggi:_omaggi, omaggiVal:_omaggiVal };
-  }, [orders, reportDay]);
+    /* Incasso suddiviso per CENTRO DI COSTO (BAR, CIBO, PIZZA...).
+       Si parte dagli articoli dello scontrino: ogni categoria appartiene a un
+       centro. L'eventuale sconto viene ripartito in proporzione. Gli omaggi
+       restano fuori dall'incasso, come nel resto del report. */
+    const _centriBreak = {};
+    inScope.filter(o=>!isOmaggio(o)).forEach(o => {
+      const lordoScontrino = (o.items||[]).reduce((s,i)=>s+(i.price||0)*(i.qty||0), 0);
+      const fattore = lordoScontrino ? (o.total||0)/lordoScontrino : 1;
+      (o.items||[]).forEach(i => {
+        const c = centroDi(centri, i.cat);
+        const k = c ? etichetta(c) : "— senza centro";
+        const r = _centriBreak[k] || { tot:0, qty:0 };
+        r.tot += (i.price||0)*(i.qty||0)*fattore;
+        r.qty += (i.qty||0);
+        _centriBreak[k] = r;
+      });
+    });
+    const _centri = Object.entries(_centriBreak).sort((a,b)=>b[1].tot-a[1].tot);
+    return { scopeO:inScope, scopeRev:_scopeRev, totalRev:_totalRev, payBreak:_payBreak, topItems:_topItems, omaggi:_omaggi, omaggiVal:_omaggiVal, centriBreak:_centri };
+  }, [orders, reportDay, centri]);
 
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
@@ -987,12 +1010,16 @@ function POS({ theme, toggleTheme }) {
       ["Metodo", "Totale (€)"],
       ...Object.entries(payBreak).map(([m,v]) => [m, Number(v.toFixed(2))]),
       [],
+      ["INCASSO PER CENTRO DI COSTO"],
+      ["Centro", "Incasso (€)", "Pezzi venduti"],
+      ...centriBreak.map(([nome,d]) => [nome, Number(d.tot.toFixed(2)), d.qty]),
+      [],
       ["TOP PRODOTTI"],
       ["Prodotto", "Quantità venduta"],
       ...topItems.map(([name,qty]) => [name, qty]),
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(riepilogo);
-    ws1["!cols"] = [{wch: 28}, {wch: 22}];
+    ws1["!cols"] = [{wch: 30}, {wch: 22}, {wch: 16}];
     XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo");
 
     // --- Foglio 2: Scontrini ---
@@ -1326,6 +1353,18 @@ function POS({ theme, toggleTheme }) {
               </div>
             ))}
           </div>
+          {/* Incasso per centro di costo */}
+          <div style={{background:"#1e293b",borderRadius:10,padding:"14px",border:"1px solid #334155",marginBottom:10}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",marginBottom:10}}>🏭 Incasso per centro di costo</div>
+            {!centriBreak.length&&<div style={{color:"#64748b",fontSize:13}}>Nessun dato</div>}
+            {centriBreak.map(([nome,d])=>(
+              <div key={nome} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #334155"}}>
+                <span style={{flex:1,fontSize:13,fontWeight:600}}>{nome}</span>
+                <span style={{color:"#64748b",fontSize:12}}>{d.qty} pz</span>
+                <span style={{fontWeight:700,color:"#4ade80",fontSize:13,minWidth:70,textAlign:"right"}}>{fmt(d.tot)}</span>
+              </div>
+            ))}
+          </div>
           {/* Top prodotti */}
           <div style={{background:"#1e293b",borderRadius:10,padding:"14px",border:"1px solid #334155",marginBottom:10}}>
             <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",marginBottom:10}}>🏆 Top Prodotti</div>
@@ -1628,6 +1667,19 @@ function POS({ theme, toggleTheme }) {
                 </div>
               ))}
             </div>
+          </div>
+          <div style={{background:"#1e293b",borderRadius:12,padding:20,border:"1px solid #334155",marginBottom:16}}>
+            <h3 style={{fontSize:15,fontWeight:700,marginBottom:14,color:"#f8fafc"}}>🏭 Incasso per centro di costo</h3>
+            {!centriBreak.length&&<p style={{color:"#64748b"}}>Nessun dato</p>}
+            {centriBreak.map(([nome,d])=>(
+              <div key={nome} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                <span style={{minWidth:160,fontWeight:600}}>{nome}</span>
+                <span style={{color:"#64748b",fontSize:12,minWidth:70}}>{d.qty} pz</span>
+                <div style={{flex:1,height:8,background:"#334155",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",background:"#0ea5e9",borderRadius:4,width:`${(d.tot/(scopeRev||1)*100).toFixed(0)}%`,minWidth:4}}/></div>
+                <span style={{color:"#64748b",fontSize:12,minWidth:50,textAlign:"right"}}>{(d.tot/(scopeRev||1)*100).toFixed(1)}%</span>
+                <span style={{fontWeight:700,color:"#4ade80",minWidth:80,textAlign:"right"}}>{fmt(d.tot)}</span>
+              </div>
+            ))}
           </div>
           <div style={{background:"#1e293b",borderRadius:12,padding:20,border:"1px solid #334155",marginBottom:16}}>
             <h3 style={{fontSize:15,fontWeight:700,marginBottom:14,color:"#f8fafc"}}>🧾 Scontrini {reportDay==="all"?"(ultimi 50)":"· "+reportDay}</h3>
