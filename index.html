@@ -1490,7 +1490,7 @@ function POS({ theme, toggleTheme }) {
           ))}
         </div>
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:12}}>
-          <span style={{color:"#64748b",fontSize:12}}>{new Date().toLocaleDateString("it-IT",{weekday:"long",day:"numeric",month:"long"})}</span>
+          <span style={{color:"#64748b",fontSize:12}}>{new Date().toLocaleDateString("it-IT",{weekday:"long",day:"numeric",month:"long"})} <span style={{color:"#334155",fontSize:11}}>· v3</span></span>
           <button onClick={openDrawer} title="Apri cassetto" style={{background:"#334155",border:"1px solid #475569",color:"#fff",padding:"6px 14px",borderRadius:8,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>💶 Apri cassetto</button>
           <button onClick={toggleTheme} title="Cambia tema" style={{background:"#334155",border:"none",color:"#fff",width:36,height:36,borderRadius:8,fontSize:16,cursor:"pointer"}}>
             {theme==="dark"?"☀️":"🌙"}
@@ -1571,7 +1571,7 @@ function POS({ theme, toggleTheme }) {
                 </div>
               ))}
             </div>
-            <div style={{padding:"12px 14px",borderTop:"1px solid #1e293b",flexShrink:0,maxHeight:"70%",overflowY:"auto"}}>
+            <div style={{padding:"12px 14px 76px",borderTop:"1px solid #1e293b",flexShrink:0}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
                 <span style={{color:"#94a3b8"}}>Sconto %</span>
                 <input type="number" min="0" max="100" value={disc} onChange={e=>setDisc(Math.min(100,Math.max(0,+e.target.value)))} style={{background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"4px 8px",borderRadius:6,width:60,textAlign:"center",fontSize:14,fontFamily:"inherit",outline:"none"}} />
@@ -1584,7 +1584,10 @@ function POS({ theme, toggleTheme }) {
                   <button key={m} onClick={()=>setPay(m)} style={{background:pay===m?"#991b1b":"#1e293b",border:`1px solid ${pay===m?"#dc2626":"#334155"}`,color:pay===m?"#fff":"#94a3b8",padding:"7px 4px",borderRadius:8,cursor:"pointer",fontSize:12,fontFamily:"inherit",textTransform:"capitalize"}}>{ic} {m}</button>
                 ))}
               </div>
-              <div style={{display:"flex",gap:8}}>
+              {/* Barra azioni ANCORATA IN BASSO allo schermo: qualunque sia
+                  l'altezza della finestra, lo zoom o la scalatura di Windows,
+                  il tasto Incassa resta sempre visibile. */}
+              <div style={{position:"fixed",right:0,bottom:0,width:340,display:"flex",gap:8,padding:"10px 14px",background:"#131f30",borderTop:"1px solid #1e293b",boxShadow:"0 -6px 16px rgba(0,0,0,0.45)",zIndex:200,boxSizing:"border-box"}}>
                 <button onClick={clearCart} style={{flex:1,background:"#7f1d1d",border:"none",color:"#fca5a5",padding:"10px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13}}>🗑 Cancella</button>
                 <button onClick={checkout} disabled={!cart.length || processing} style={{flex:2,background:processing?"#166534":"#15803d",border:"none",color:"#fff",padding:"10px",borderRadius:8,cursor:processing?"wait":"pointer",opacity:processing?0.6:1,fontFamily:"inherit",fontSize:13,fontWeight:700}}>{processing ? "⏳ Attendi…" : <>✅ Incassa {fmt(total)}</>}</button>
               </div>
