@@ -217,21 +217,61 @@
 <body>
 <div id="root"></div>
 <script>
-  /* Misura l'altezza REALE dell'area visibile e la scrive in --app-h.
-     Serve su iPhone/Android (barre che compaiono e scompaiono), su Windows
-     con scalatura o zoom, e quando si apre la tastiera su tablet. */
+  /* ══ ALTEZZA UTILE DELLO SCHERMO ══
+     Scrive in --app-h l'altezza REALMENTE VISIBILE della pagina.
+     Non basta innerHeight: se la finestra del browser e' piu' alta dello
+     schermo (classico su Windows quando il bordo inferiore finisce sotto la
+     barra delle applicazioni, o la finestra e' stata trascinata in basso),
+     il browser crede di avere piu' spazio di quello che l'occhio vede e i
+     tasti in fondo restano fuori. Qui calcoliamo dove finisce davvero
+     l'area utile dello schermo e l'app si ferma li'.
+     In piu' c'e' un margine manuale regolabile da Impostazioni, per i casi
+     in cui Windows riporta misure sbagliate. */
   (function () {
-    var setH = function () {
+    var KEY = 'cassapro_ui_offset';
+    var manual = 0;
+    try { manual = parseInt(localStorage.getItem(KEY) || '0', 10) || 0; } catch (e) {}
+
+    function visibleHeight() {
       var vv = window.visualViewport;
       var h = (vv && vv.height) ? vv.height : window.innerHeight;
-      document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+      try {
+        // px dello schermo per ogni px CSS (tiene conto dello zoom del browser)
+        var k = window.outerWidth / window.innerWidth;
+        if (isFinite(k) && k > 0.2 && k < 5) {
+          var s = window.screen;
+          var availTop = (typeof s.availTop === 'number') ? s.availTop : 0;
+          var availBottom = availTop + s.availHeight;              // sopra la barra applicazioni
+          var chrome = window.outerHeight - window.innerHeight * k; // barre del browser
+          var viewportTop = window.screenY + chrome;                // dove inizia la pagina
+          var visible = (availBottom - viewportTop) / k;            // quanta pagina si vede davvero
+          // si applica solo se il risultato e' plausibile (mai meno di meta' finestra)
+          if (visible > 300 && visible > h * 0.5 && visible < h) h = visible;
+        }
+      } catch (e) {}
+      return Math.max(300, h - manual);
+    }
+
+    function apply() {
+      document.documentElement.style.setProperty('--app-h', Math.round(visibleHeight()) + 'px');
+    }
+    // usate dalla sezione Impostazioni
+    window.cassaUiOffset = function (px) {
+      manual = Math.max(0, Math.min(400, parseInt(px, 10) || 0));
+      try { localStorage.setItem(KEY, String(manual)); } catch (e) {}
+      apply();
+      return manual;
     };
-    setH();
-    window.addEventListener('resize', setH);
-    window.addEventListener('orientationchange', function () { setTimeout(setH, 120); });
+    window.cassaUiOffsetGet = function () { return manual; };
+
+    apply();
+    window.addEventListener('resize', apply);
+    window.addEventListener('orientationchange', function () { setTimeout(apply, 120); });
+    // spostare la finestra non genera nessun evento: ricontrolliamo periodicamente
+    setInterval(apply, 1500);
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', setH);
-      window.visualViewport.addEventListener('scroll', setH);
+      window.visualViewport.addEventListener('resize', apply);
+      window.visualViewport.addEventListener('scroll', apply);
     }
   })();
 </script>
@@ -1488,6 +1528,7 @@ function POS({ theme, toggleTheme }) {
       {view==="impostazioni" && (
         <div style={{flex:1,overflowY:"auto",padding:"12px 10px"}}>
           <div style={{fontSize:18,fontWeight:900,color:"#f8fafc",marginBottom:14}}>⚙️ Impostazioni</div>
+          <AdattaSchermo />
           <div style={{background:"#1e293b",borderRadius:10,padding:14,border:"1px solid #334155",marginBottom:10}}>
             <div style={{fontSize:14,fontWeight:700,color:"#f8fafc",marginBottom:10}}>🖨️ Rotolo Termico 80mm</div>
             {[["1️⃣","Collega la stampante termica via USB"],["2️⃣","Installa i driver dal sito del produttore"],["3️⃣","Impostala come stampante predefinita in Windows"],["4️⃣","Clicca Stampa → seleziona la termica"],["5️⃣","Imposta margini = Nessuno, scala = 100%"],["6️⃣","Salva come impostazioni predefinite"]].map(([n,t])=>(
@@ -1792,6 +1833,7 @@ function POS({ theme, toggleTheme }) {
       {view==="impostazioni"&&(
         <div style={{padding:24,maxWidth:1000,margin:"0 auto",width:"100%",overflowY:"auto",flex:1,minHeight:0}}>
           <h2 style={{fontSize:24,fontWeight:900,marginBottom:24,color:"#f8fafc"}}>⚙️ Impostazioni</h2>
+          <AdattaSchermo />
           <div style={{background:"#1e293b",borderRadius:12,padding:20,border:"1px solid #334155",marginBottom:16}}>
             <h3 style={{fontSize:15,fontWeight:700,marginBottom:14,color:"#f8fafc"}}>🖨️ Rotolo Termico 80mm</h3>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -3012,6 +3054,36 @@ function ScontrinoConfig({ cfg, save, reset, anteprima, centri, saveCentri, isMo
       {toggle("mostraData",      "Mostra data e ora")}
       {toggle("mostraNome",      "Mostra " + String(cfg.etichettaNome || "nome").toLowerCase())}
       {toggle("mostraPagamento", "Mostra metodo di pagamento")}
+    </div>
+  );
+}
+
+/* ── ADATTA ALLO SCHERMO ──
+   Scorciatoia manuale per quando il bordo inferiore della finestra finisce
+   sotto la barra delle applicazioni di Windows (o sotto il bordo dello
+   schermo) e i tasti in fondo restano nascosti. Alza il margine finche' il
+   tasto Incassa non ricompare: la scelta resta salvata su questo PC. */
+function AdattaSchermo() {
+  const [off, setOff] = useState(() => (window.cassaUiOffsetGet ? window.cassaUiOffsetGet() : 0));
+  const set = (v) => { const n = window.cassaUiOffset ? window.cassaUiOffset(v) : 0; setOff(n); };
+  const btn = (bg) => ({background:bg,border:"none",color:"#fff",padding:"10px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700});
+  return (
+    <div style={{background:"#1e293b",borderRadius:12,padding:16,border:"1px solid #334155",marginBottom:16}}>
+      <div style={{fontSize:15,fontWeight:700,marginBottom:8,color:"#f8fafc"}}>🖥️ Adatta allo schermo</div>
+      <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6,marginBottom:12}}>
+        Se i tasti in fondo (TOTALE, Incassa) restano nascosti dietro la barra delle applicazioni,
+        alza il margine finché non ricompaiono. Resta salvato su questo dispositivo.
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <button onClick={()=>set(off-20)} style={btn("#334155")}>− 20</button>
+        <div style={{minWidth:96,textAlign:"center",fontSize:18,fontWeight:900,color:"#4ade80"}}>{off} px</div>
+        <button onClick={()=>set(off+20)} style={btn("#15803d")}>+ 20</button>
+        <button onClick={()=>set(off+60)} style={btn("#15803d")}>+ 60</button>
+        <button onClick={()=>set(0)} style={btn("#7f1d1d")}>Azzera</button>
+      </div>
+      <div style={{fontSize:12,color:"#64748b",marginTop:10,lineHeight:1.6}}>
+        Alternativa rapida: premi <b>F11</b> per mettere Chrome a schermo intero, oppure massimizza la finestra.
+      </div>
     </div>
   );
 }
