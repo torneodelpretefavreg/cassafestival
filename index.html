@@ -10,6 +10,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <!-- SheetJS for real Excel .xlsx export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- jsPDF + AutoTable: export del report in PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -190,6 +193,9 @@
     /* Ombre più morbide in light */
     html.light [style*="box-shadow: rgba(0, 0, 0, 0.5)"] { box-shadow: 0 8px 40px rgba(0,0,0,0.15) !important; }
 
+    /* Contenitore della stampa in blocco: fuori schermo finche' non si stampa */
+    #receipt-batch { position: absolute; left: -99999px; top: 0; width: 72mm; }
+
     @page { margin: 0mm 2mm; size: 76mm auto; }
     @media print {
       body * { visibility: hidden !important; }
@@ -200,6 +206,28 @@
         font-size: 11px !important; color: #000 !important; background: #fff !important;
         padding: 2mm !important; font-weight: bold !important;
         -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+      }
+      /* ══ STAMPA IN BLOCCO ══
+         Tutti gli scontrini dell'ordine (copie comprese) in UN SOLO lavoro di
+         stampa: una sola finestra di dialogo invece di una per scontrino.
+         Ogni scontrino e' una "pagina": sul rotolo termico esce come stacco. */
+      html.printing-batch #root,
+      html.printing-batch #receipt-print,
+      html.printing-batch #drawer-print { display: none !important; }
+      html.printing-batch #receipt-batch,
+      html.printing-batch #receipt-batch * { visibility: visible !important; }
+      html.printing-batch #receipt-batch {
+        display: block !important; position: static !important; left: auto !important;
+        width: 72mm !important; font-family: 'Courier New', monospace !important;
+        font-size: 11px !important; color: #000 !important; background: #fff !important;
+        padding: 0 !important; font-weight: bold !important;
+        -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+      }
+      html.printing-batch #receipt-batch .rcpt-page {
+        padding: 2mm !important; break-after: page; page-break-after: always;
+      }
+      html.printing-batch #receipt-batch .rcpt-page:last-child {
+        break-after: auto; page-break-after: auto;
       }
       /* Microstampa per apertura cassetto: nasconde lo scontrino e stampa solo il kick */
       #drawer-print, #drawer-print * { visibility: hidden !important; }
@@ -443,6 +471,8 @@ function POS({ theme, toggleTheme }) {
   const [lastR, setLastR]   = useState(null);
   const [rcptIdx, setRcptIdx] = useState(0);
   const [autoPrint, setAutoPrint] = useState(false);
+  const [batch, setBatch] = useState([]); // scontrini in attesa di stampa in blocco
+  const batchId = useRef(0);
 
   useEffect(() => {
     if (autoPrint && view === "scontrino" && lastR) {
@@ -598,7 +628,7 @@ function POS({ theme, toggleTheme }) {
     if (!tag) { tag = document.createElement("style"); tag.id = "print-size"; document.head.appendChild(tag); }
     tag.textContent =
       "@page { size: " + w + "mm auto; margin: 0; }" +
-      "@media print { #receipt-print, html.printing-drawer #drawer-print { width: " + w + "mm !important; } }";
+      "@media print { #receipt-print, html.printing-drawer #drawer-print, html.printing-batch #receipt-batch, html.printing-batch #receipt-batch .rcpt-page { width: " + w + "mm !important; } }";
   }, [rcptCfg.larghezza]);
 
   const saveRcptCfg = (patch) => {
@@ -735,36 +765,52 @@ function POS({ theme, toggleTheme }) {
   // i lavori vengono accodati con un piccolo intervallo tra l'uno e l'altro.
   // Stampa manuale del solo scontrino a video: rispetta le copie del suo centro,
   // ma ne stampa comunque almeno una (il tasto è stato premuto apposta).
-  const printCurrent = (r) => {
-    const membri = r && r.gruppo ? centri.filter(c => c.gruppo === r.gruppo) : [];
-    const n = Math.max(1, copieGruppo(membri));
-    const step = (c) => {
-      try { window.print(); } catch (e) {}
-      if (c + 1 < n) setTimeout(() => step(c + 1), 400);
-    };
-    step(0);
+  const printCurrent = (r) => { if (r) printAllReceipts([r], true); };
+
+  /* ══ STAMPA IN BLOCCO ══
+     Mette tutti gli scontrini dell'ordine (ripetuti secondo le copie del loro
+     centro di costo) in un UNICO lavoro di stampa: una sola finestra di
+     dialogo, non una per scontrino. Ogni scontrino e' una pagina separata,
+     quindi sul rotolo termico escono staccati come prima. */
+  const codaStampa = (receipts, minUno) => {
+    const coda = [];
+    (receipts || []).forEach(r => {
+      const membri = r && r.gruppo ? centri.filter(c => c.gruppo === r.gruppo) : [];
+      let n = r && r.gruppo ? copieGruppo(membri) : 1;
+      if (minUno) n = Math.max(1, n);
+      for (let c = 0; c < n; c++) coda.push(r);
+    });
+    return coda;
   };
 
-  // Costruisce la coda di stampa: ogni scontrino viene ripetuto tante volte
-  // quante ne prevede il suo centro di costo (0 = saltato del tutto).
-  const printAllReceipts = (receipts) => {
-    if (!receipts || !receipts.length) return;
-    const coda = [];
-    receipts.forEach((r, k) => {
-      const membri = r.gruppo ? centri.filter(c => c.gruppo === r.gruppo) : [];
-      const n = r.gruppo ? copieGruppo(membri) : 1;
-      for (let c = 0; c < n; c++) coda.push(k);
-    });
+  const printAllReceipts = (receipts, minUno) => {
+    const coda = codaStampa(receipts, minUno);
     if (!coda.length) return;
-    const step = (i) => {
-      setRcptIdx(coda[i]);
-      setTimeout(() => {
-        try { window.print(); } catch (e) {}
-        if (i + 1 < coda.length) setTimeout(() => step(i + 1), 400);
-      }, 500); // attende il render del nuovo scontrino
-    };
-    step(0);
+    batchId.current++;          // ogni stampa ha il suo numero: una nuova
+    setBatch(coda);             // non viene annullata dalla pulizia di quella prima
   };
+
+  // Quando la coda e' montata nel DOM lanciamo una sola stampa.
+  useEffect(() => {
+    if (!batch.length) return;
+    const mine = batchId.current;
+    const html = document.documentElement;
+    let done = false;
+    const cleanup = () => {
+      window.removeEventListener("afterprint", cleanup);
+      if (done || batchId.current !== mine) return; // e' gia' partita un'altra stampa
+      done = true;
+      html.classList.remove("printing-batch");
+      setBatch(cur => (batchId.current === mine ? [] : cur));
+    };
+    const t = setTimeout(() => {
+      html.classList.add("printing-batch");
+      window.addEventListener("afterprint", cleanup);
+      try { window.print(); } catch (e) {}
+      setTimeout(cleanup, 1500); // in modalita' chiosco "afterprint" puo' non scattare
+    }, 150); // lascia il tempo al render
+    return () => clearTimeout(t);
+  }, [batch]);
 
   const checkout = () => {
     if (!cart.length) return;
@@ -1172,6 +1218,148 @@ function POS({ theme, toggleTheme }) {
     XLSX.writeFile(wb, "report_festival_" + dateStr + ".xlsx");
   };
 
+  /* ══ EXPORT PDF ══
+     Stesso contenuto dell'Excel ma impaginato e pronto da leggere o allegare.
+     Genera un vero file .pdf scaricato dal browser: non passa dalla stampa,
+     quindi funziona anche con la stampa diretta (kiosk) attiva. */
+  const exportPDF = () => {
+    const JSPDF = window.jspdf && window.jspdf.jsPDF;
+    if (!JSPDF) { alert("Libreria PDF non caricata: controlla la connessione e ricarica la pagina."); return; }
+    const doc = new JSPDF({ unit: "pt", format: "a4" });
+    const W = doc.internal.pageSize.getWidth();
+    const M = 40;                                   // margine
+    const eur = n => (Number(n)||0).toFixed(2).replace(".", ",") + " €";
+    /* I font standard del PDF non hanno le emoji: le togliamo dalle etichette
+       (nomi dei centri, prodotti…) altrimenti escono come caratteri strani. */
+    const txt = v => String(v == null ? "" : v)
+      .replace(/[^\x20-\xFF€]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const giornata = reportDay === "all" ? "Tutte le giornate" : reportDay;
+    const medio = scopeO.filter(o=>!isOmaggio(o)).length ? scopeRev/scopeO.filter(o=>!isOmaggio(o)).length : 0;
+
+    // ── Intestazione ──
+    doc.setFillColor(220, 38, 38);
+    doc.rect(0, 0, W, 76, "F");
+    doc.setTextColor(255);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+    doc.text(txt(EVT.nomeLungo), M, 34);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+    doc.text("Report incassi  ·  " + txt(giornata), M, 54);
+    doc.setFontSize(9);
+    doc.text("Generato il " + new Date().toLocaleString("it-IT"), W - M, 54, { align: "right" });
+    doc.setTextColor(0);
+
+    // ── Riquadri riepilogo ──
+    const kpi = [
+      ["Incasso",        eur(scopeRev)],
+      ["Scontrini",      String(scopeO.length)],
+      ["Scontrino medio", eur(medio)],
+      ["Omaggi",         eur(omaggiVal) + "  (" + omaggi.length + ")"],
+    ];
+    const bw = (W - M*2 - 18) / 4;
+    kpi.forEach(([k, v], i) => {
+      const x = M + i * (bw + 6);
+      doc.setDrawColor(220); doc.setFillColor(246, 246, 244);
+      doc.roundedRect(x, 96, bw, 52, 4, 4, "FD");
+      doc.setFontSize(8.5); doc.setTextColor(110);
+      doc.text(k.toUpperCase(), x + 10, 114);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(20);
+      doc.text(v, x + 10, 136);
+      doc.setFont("helvetica", "normal");
+    });
+
+    const tavola = (head, body, startY) => {
+      if (!body.length) {
+        doc.setFontSize(9); doc.setTextColor(130);
+        doc.text("Nessun dato", M, startY + 12);
+        doc.setTextColor(0);
+        return startY + 30;
+      }
+      doc.autoTable({
+        startY,
+        head: [head],
+        body,
+        margin: { left: M, right: M, bottom: 46 },
+        styles: { font: "helvetica", fontSize: 9, cellPadding: 4, overflow: "linebreak" },
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [247, 247, 245] },
+        showHead: "everyPage",
+      });
+      return doc.lastAutoTable.finalY + 22;
+    };
+    const titolo = (t, y) => {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(20);
+      doc.text(t, M, y);
+      doc.setFont("helvetica", "normal");
+      return y + 8;
+    };
+
+    let y = 178;
+    y = titolo("Metodi di pagamento", y);
+    y = tavola(["Metodo", "Totale"],
+      Object.entries(payBreak).map(([m, v]) => [txt(m.charAt(0).toUpperCase()+m.slice(1)), eur(v)]), y);
+
+    y = titolo("Incasso per centro di costo", y);
+    y = tavola(["Centro", "Incasso", "Pezzi"],
+      centriBreak.map(([nome, d]) => [txt(nome), eur(d.tot), String(d.qty)]), y);
+
+    // Prodotti venduti: quantita' e incasso, tutti (non solo i primi 5)
+    const perProdotto = {};
+    scopeO.filter(o => !isOmaggio(o)).forEach(o => {
+      const lordo = (o.items||[]).reduce((s,i)=>s+(i.price||0)*(i.qty||0), 0);
+      const f = lordo ? (o.total||0)/lordo : 1;
+      (o.items||[]).forEach(i => {
+        const r = perProdotto[i.name] || { qty:0, tot:0 };
+        r.qty += (i.qty||0); r.tot += (i.price||0)*(i.qty||0)*f;
+        perProdotto[i.name] = r;
+      });
+    });
+    const prodotti = Object.entries(perProdotto).sort((a,b)=>b[1].tot-a[1].tot);
+    y = titolo("Prodotti venduti", y);
+    y = tavola(["Prodotto", "Quantità", "Incasso"],
+      prodotti.map(([n, d]) => [txt(n), String(d.qty), eur(d.tot)]), y);
+
+    // Elenco scontrini
+    doc.addPage();
+    y = titolo("Elenco scontrini — " + txt(giornata), 50);
+    tavola(["N.", "Data e ora", "Cliente", "Centro", "Pag.", "Totale"],
+      [...scopeO].reverse().map(o => [
+        String(o.id).padStart(4, "0"),
+        txt(o.date),
+        txt(o.table) || "-",
+        txt(o.centro) || "-",
+        txt(o.pay),
+        eur(o.total),
+      ]), y);
+
+    // Numeri di pagina
+    const tot = doc.internal.getNumberOfPages();
+    for (let p = 1; p <= tot; p++) {
+      doc.setPage(p);
+      doc.setFontSize(8); doc.setTextColor(140);
+      doc.text(txt(EVT.nomeLungo) + " · " + txt(giornata), M, doc.internal.pageSize.getHeight() - 20);
+      doc.text("Pagina " + p + " di " + tot, W - M, doc.internal.pageSize.getHeight() - 20, { align: "right" });
+    }
+
+    const dateStr = (reportDay === "all" ? today : reportDay).replace(/\//g, "-");
+    doc.save("report_festival_" + dateStr + ".pdf");
+  };
+
+  /* Contenitore (fuori schermo) con TUTTI gli scontrini da stampare in blocco.
+     Viene montato in fondo alla pagina, fuori dall'app, cosi' in stampa basta
+     nascondere l'app e mostrare lui. */
+  const batchPrintJSX = batch.length > 0 && ReactDOM.createPortal(
+    <div id="receipt-batch">
+      {batch.map((r, i) => (
+        <div className="rcpt-page" key={i}>
+          <ReceiptBody r={r} cfg={rcptCfg} />
+        </div>
+      ))}
+    </div>,
+    document.body
+  );
+
   // Modale per inserire una nota libera sulla pizza (condivisa mobile + desktop)
   const noteModalJSX = noteItem && (
     <div onClick={()=>{setNoteItem(null);setNoteText("");}} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -1232,6 +1420,7 @@ function POS({ theme, toggleTheme }) {
 
       {/* MODALE NOTA PIZZA */}
       {noteModalJSX}
+      {batchPrintJSX}
 
       {/* TOP BAR */}
       <div className="topnav" style={{background:"#1e293b",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,borderBottom:"1px solid #334155",flexShrink:0}}>
@@ -1422,8 +1611,13 @@ function POS({ theme, toggleTheme }) {
           <div id="receipt-print" style={{background:"#fff",color:"#000",width:"100%",maxWidth:320,padding:20,borderRadius:8,fontFamily:"'JetBrains Mono','Courier New',monospace",fontSize:rcptCfg.fontBase,fontWeight:700}}>
             <ReceiptBody r={r} cfg={rcptCfg} />
           </div>
-          <div style={{display:"flex",gap:10,marginTop:16,width:"100%",maxWidth:320}}>
-            <button onClick={()=>printCurrent(r)} style={{flex:1,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>🖨 Stampa</button>
+          {hasMultiple && (
+            <button onClick={()=>printAllReceipts(receipts, true)} style={{width:"100%",maxWidth:320,marginTop:16,background:"#1d4ed8",border:"none",color:"#fff",padding:"14px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:15,fontWeight:900}}>
+              🖨 Stampa tutti ({codaStampa(receipts, true).length}) — una sola finestra
+            </button>
+          )}
+          <div style={{display:"flex",gap:10,marginTop:10,width:"100%",maxWidth:320}}>
+            <button onClick={()=>printCurrent(r)} style={{flex:1,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>🖨 Solo questo</button>
             {!isLast
               ? <button onClick={()=>{setRcptIdx(rcptIdx+1);setAutoPrint(true);}} style={{flex:2,background:"#dc2626",border:"none",color:"#fff",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:900}}>Prossimo →</button>
               : <button onClick={()=>setView("cassa")} style={{flex:2,background:"#15803d",border:"none",color:"#fff",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:900}}>➕ Nuovo Ordine</button>
@@ -1438,7 +1632,10 @@ function POS({ theme, toggleTheme }) {
         <div style={{flex:1,overflowY:"auto",padding:"12px 10px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div style={{fontSize:18,fontWeight:900,color:"#f8fafc"}}>📊 Report</div>
-            <button onClick={exportExcel} style={{background:"#15803d",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📥 Excel</button>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={exportExcel} style={{background:"#15803d",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📥 Excel</button>
+              <button onClick={exportPDF} style={{background:"#b91c1c",border:"none",color:"#fff",padding:"8px 14px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>📄 PDF</button>
+            </div>
           </div>
           {/* Selettore giornata */}
           <div style={{marginBottom:14}}>
@@ -1584,6 +1781,7 @@ function POS({ theme, toggleTheme }) {
       )}
       {/* MODALE NOTA PIZZA */}
       {noteModalJSX}
+      {batchPrintJSX}
 
       <nav className="topnav" style={{background:"#1e293b",padding:"12px 24px",display:"flex",alignItems:"center",gap:16,borderBottom:"1px solid #334155",flexWrap:"wrap",flexShrink:0}}>
         <div className="brand" style={{fontSize:19,fontWeight:800,color:"#f8fafc",marginRight:8,letterSpacing:"-0.4px",display:"flex",alignItems:"center",gap:9}}><Logo size={32}/>{EVT.nomeLungo}</div>
@@ -1720,8 +1918,13 @@ function POS({ theme, toggleTheme }) {
           <div id="receipt-print" style={{background:"#fff",color:"#000",width:280,padding:20,borderRadius:4,boxShadow:"0 8px 40px rgba(0,0,0,0.5)",fontFamily:"'JetBrains Mono','Courier New',monospace",fontSize:rcptCfg.fontBase,fontWeight:700}}>
             <ReceiptBody r={r} cfg={rcptCfg} />
           </div>
-          <div style={{display:"flex",gap:12,marginTop:24}}>
-            <button onClick={()=>printCurrent(r)} style={{background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>🖨 Stampa</button>
+          <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap",justifyContent:"center"}}>
+            {hasMultiple && (
+              <button onClick={()=>printAllReceipts(receipts, true)} style={{background:"#1d4ed8",border:"none",color:"#fff",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:800}}>
+                🖨 Stampa tutti ({codaStampa(receipts, true).length}) — una sola finestra
+              </button>
+            )}
+            <button onClick={()=>printCurrent(r)} style={{background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>🖨 Solo questo</button>
             {!isLast
               ? <button onClick={()=>{setRcptIdx(rcptIdx+1);setAutoPrint(true);}} style={{background:"#dc2626",border:"none",color:"#fff",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>Prossimo → {receipts[rcptIdx+1].centro}</button>
               : <button onClick={()=>setView("cassa")} style={{background:"#15803d",border:"none",color:"#fff",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>➕ Nuovo Ordine</button>
@@ -1741,6 +1944,7 @@ function POS({ theme, toggleTheme }) {
                 {reportDays.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
               <button onClick={exportExcel} style={{background:"#15803d",border:"1px solid #16a34a",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📥 Scarica Excel</button>
+              <button onClick={exportPDF} style={{background:"#b91c1c",border:"1px solid #dc2626",color:"#fff",padding:"10px 20px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>📄 Scarica PDF</button>
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
