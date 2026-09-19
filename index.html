@@ -193,9 +193,6 @@
     /* Ombre più morbide in light */
     html.light [style*="box-shadow: rgba(0, 0, 0, 0.5)"] { box-shadow: 0 8px 40px rgba(0,0,0,0.15) !important; }
 
-    /* Contenitore della stampa in blocco: fuori schermo finche' non si stampa */
-    #receipt-batch { position: absolute; left: -99999px; top: 0; width: 72mm; }
-
     @page { margin: 0mm 2mm; size: 76mm auto; }
     @media print {
       body * { visibility: hidden !important; }
@@ -206,28 +203,6 @@
         font-size: 11px !important; color: #000 !important; background: #fff !important;
         padding: 2mm !important; font-weight: bold !important;
         -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
-      }
-      /* ══ STAMPA IN BLOCCO ══
-         Tutti gli scontrini dell'ordine (copie comprese) in UN SOLO lavoro di
-         stampa: una sola finestra di dialogo invece di una per scontrino.
-         Ogni scontrino e' una "pagina": sul rotolo termico esce come stacco. */
-      html.printing-batch #root,
-      html.printing-batch #receipt-print,
-      html.printing-batch #drawer-print { display: none !important; }
-      html.printing-batch #receipt-batch,
-      html.printing-batch #receipt-batch * { visibility: visible !important; }
-      html.printing-batch #receipt-batch {
-        display: block !important; position: static !important; left: auto !important;
-        width: 72mm !important; font-family: 'Courier New', monospace !important;
-        font-size: 11px !important; color: #000 !important; background: #fff !important;
-        padding: 0 !important; font-weight: bold !important;
-        -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
-      }
-      html.printing-batch #receipt-batch .rcpt-page {
-        padding: 2mm !important; break-after: page; page-break-after: always;
-      }
-      html.printing-batch #receipt-batch .rcpt-page:last-child {
-        break-after: auto; page-break-after: auto;
       }
       /* Microstampa per apertura cassetto: nasconde lo scontrino e stampa solo il kick */
       #drawer-print, #drawer-print * { visibility: hidden !important; }
@@ -471,8 +446,6 @@ function POS({ theme, toggleTheme }) {
   const [lastR, setLastR]   = useState(null);
   const [rcptIdx, setRcptIdx] = useState(0);
   const [autoPrint, setAutoPrint] = useState(false);
-  const [batch, setBatch] = useState([]); // scontrini in attesa di stampa in blocco
-  const batchId = useRef(0);
 
   useEffect(() => {
     if (autoPrint && view === "scontrino" && lastR) {
@@ -628,7 +601,7 @@ function POS({ theme, toggleTheme }) {
     if (!tag) { tag = document.createElement("style"); tag.id = "print-size"; document.head.appendChild(tag); }
     tag.textContent =
       "@page { size: " + w + "mm auto; margin: 0; }" +
-      "@media print { #receipt-print, html.printing-drawer #drawer-print, html.printing-batch #receipt-batch, html.printing-batch #receipt-batch .rcpt-page { width: " + w + "mm !important; } }";
+      "@media print { #receipt-print, html.printing-drawer #drawer-print { width: " + w + "mm !important; } }";
   }, [rcptCfg.larghezza]);
 
   const saveRcptCfg = (patch) => {
@@ -765,52 +738,38 @@ function POS({ theme, toggleTheme }) {
   // i lavori vengono accodati con un piccolo intervallo tra l'uno e l'altro.
   // Stampa manuale del solo scontrino a video: rispetta le copie del suo centro,
   // ma ne stampa comunque almeno una (il tasto è stato premuto apposta).
-  const printCurrent = (r) => { if (r) printAllReceipts([r], true); };
-
-  /* ══ STAMPA IN BLOCCO ══
-     Mette tutti gli scontrini dell'ordine (ripetuti secondo le copie del loro
-     centro di costo) in un UNICO lavoro di stampa: una sola finestra di
-     dialogo, non una per scontrino. Ogni scontrino e' una pagina separata,
-     quindi sul rotolo termico escono staccati come prima. */
-  const codaStampa = (receipts, minUno) => {
-    const coda = [];
-    (receipts || []).forEach(r => {
-      const membri = r && r.gruppo ? centri.filter(c => c.gruppo === r.gruppo) : [];
-      let n = r && r.gruppo ? copieGruppo(membri) : 1;
-      if (minUno) n = Math.max(1, n);
-      for (let c = 0; c < n; c++) coda.push(r);
-    });
-    return coda;
-  };
-
-  const printAllReceipts = (receipts, minUno) => {
-    const coda = codaStampa(receipts, minUno);
-    if (!coda.length) return;
-    batchId.current++;          // ogni stampa ha il suo numero: una nuova
-    setBatch(coda);             // non viene annullata dalla pulizia di quella prima
-  };
-
-  // Quando la coda e' montata nel DOM lanciamo una sola stampa.
-  useEffect(() => {
-    if (!batch.length) return;
-    const mine = batchId.current;
-    const html = document.documentElement;
-    let done = false;
-    const cleanup = () => {
-      window.removeEventListener("afterprint", cleanup);
-      if (done || batchId.current !== mine) return; // e' gia' partita un'altra stampa
-      done = true;
-      html.classList.remove("printing-batch");
-      setBatch(cur => (batchId.current === mine ? [] : cur));
-    };
-    const t = setTimeout(() => {
-      html.classList.add("printing-batch");
-      window.addEventListener("afterprint", cleanup);
+  const printCurrent = (r) => {
+    const membri = r && r.gruppo ? centri.filter(c => c.gruppo === r.gruppo) : [];
+    const n = Math.max(1, copieGruppo(membri));
+    const step = (c) => {
       try { window.print(); } catch (e) {}
-      setTimeout(cleanup, 1500); // in modalita' chiosco "afterprint" puo' non scattare
-    }, 150); // lascia il tempo al render
-    return () => clearTimeout(t);
-  }, [batch]);
+      if (c + 1 < n) setTimeout(() => step(c + 1), 400);
+    };
+    step(0);
+  };
+
+  // Costruisce la coda di stampa: ogni scontrino viene ripetuto tante volte
+  // quante ne prevede il suo centro di costo (0 = saltato del tutto).
+  // Ogni scontrino e' un lavoro di stampa a se': escono staccati, perche'
+  // BAR, CUCINA e PIZZA stanno in punti diversi.
+  const printAllReceipts = (receipts) => {
+    if (!receipts || !receipts.length) return;
+    const coda = [];
+    receipts.forEach((r, k) => {
+      const membri = r.gruppo ? centri.filter(c => c.gruppo === r.gruppo) : [];
+      const n = r.gruppo ? copieGruppo(membri) : 1;
+      for (let c = 0; c < n; c++) coda.push(k);
+    });
+    if (!coda.length) return;
+    const step = (i) => {
+      setRcptIdx(coda[i]);
+      setTimeout(() => {
+        try { window.print(); } catch (e) {}
+        if (i + 1 < coda.length) setTimeout(() => step(i + 1), 400);
+      }, 500); // attende il render del nuovo scontrino
+    };
+    step(0);
+  };
 
   const checkout = () => {
     if (!cart.length) return;
@@ -1346,20 +1305,6 @@ function POS({ theme, toggleTheme }) {
     doc.save("report_festival_" + dateStr + ".pdf");
   };
 
-  /* Contenitore (fuori schermo) con TUTTI gli scontrini da stampare in blocco.
-     Viene montato in fondo alla pagina, fuori dall'app, cosi' in stampa basta
-     nascondere l'app e mostrare lui. */
-  const batchPrintJSX = batch.length > 0 && ReactDOM.createPortal(
-    <div id="receipt-batch">
-      {batch.map((r, i) => (
-        <div className="rcpt-page" key={i}>
-          <ReceiptBody r={r} cfg={rcptCfg} />
-        </div>
-      ))}
-    </div>,
-    document.body
-  );
-
   // Modale per inserire una nota libera sulla pizza (condivisa mobile + desktop)
   const noteModalJSX = noteItem && (
     <div onClick={()=>{setNoteItem(null);setNoteText("");}} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.75)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -1420,7 +1365,6 @@ function POS({ theme, toggleTheme }) {
 
       {/* MODALE NOTA PIZZA */}
       {noteModalJSX}
-      {batchPrintJSX}
 
       {/* TOP BAR */}
       <div className="topnav" style={{background:"#1e293b",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,borderBottom:"1px solid #334155",flexShrink:0}}>
@@ -1611,13 +1555,8 @@ function POS({ theme, toggleTheme }) {
           <div id="receipt-print" style={{background:"#fff",color:"#000",width:"100%",maxWidth:320,padding:20,borderRadius:8,fontFamily:"'JetBrains Mono','Courier New',monospace",fontSize:rcptCfg.fontBase,fontWeight:700}}>
             <ReceiptBody r={r} cfg={rcptCfg} />
           </div>
-          {hasMultiple && (
-            <button onClick={()=>printAllReceipts(receipts, true)} style={{width:"100%",maxWidth:320,marginTop:16,background:"#1d4ed8",border:"none",color:"#fff",padding:"14px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:15,fontWeight:900}}>
-              🖨 Stampa tutti ({codaStampa(receipts, true).length}) — una sola finestra
-            </button>
-          )}
-          <div style={{display:"flex",gap:10,marginTop:10,width:"100%",maxWidth:320}}>
-            <button onClick={()=>printCurrent(r)} style={{flex:1,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>🖨 Solo questo</button>
+          <div style={{display:"flex",gap:10,marginTop:16,width:"100%",maxWidth:320}}>
+            <button onClick={()=>printCurrent(r)} style={{flex:1,background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>🖨 Stampa</button>
             {!isLast
               ? <button onClick={()=>{setRcptIdx(rcptIdx+1);setAutoPrint(true);}} style={{flex:2,background:"#dc2626",border:"none",color:"#fff",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:900}}>Prossimo →</button>
               : <button onClick={()=>setView("cassa")} style={{flex:2,background:"#15803d",border:"none",color:"#fff",padding:"13px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:900}}>➕ Nuovo Ordine</button>
@@ -1781,7 +1720,6 @@ function POS({ theme, toggleTheme }) {
       )}
       {/* MODALE NOTA PIZZA */}
       {noteModalJSX}
-      {batchPrintJSX}
 
       <nav className="topnav" style={{background:"#1e293b",padding:"12px 24px",display:"flex",alignItems:"center",gap:16,borderBottom:"1px solid #334155",flexWrap:"wrap",flexShrink:0}}>
         <div className="brand" style={{fontSize:19,fontWeight:800,color:"#f8fafc",marginRight:8,letterSpacing:"-0.4px",display:"flex",alignItems:"center",gap:9}}><Logo size={32}/>{EVT.nomeLungo}</div>
@@ -1919,12 +1857,7 @@ function POS({ theme, toggleTheme }) {
             <ReceiptBody r={r} cfg={rcptCfg} />
           </div>
           <div style={{display:"flex",gap:12,marginTop:24,flexWrap:"wrap",justifyContent:"center"}}>
-            {hasMultiple && (
-              <button onClick={()=>printAllReceipts(receipts, true)} style={{background:"#1d4ed8",border:"none",color:"#fff",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:800}}>
-                🖨 Stampa tutti ({codaStampa(receipts, true).length}) — una sola finestra
-              </button>
-            )}
-            <button onClick={()=>printCurrent(r)} style={{background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>🖨 Solo questo</button>
+            <button onClick={()=>printCurrent(r)} style={{background:"#1e293b",border:"1px solid #334155",color:"#e2e8f0",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14}}>🖨 Stampa</button>
             {!isLast
               ? <button onClick={()=>{setRcptIdx(rcptIdx+1);setAutoPrint(true);}} style={{background:"#dc2626",border:"none",color:"#fff",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>Prossimo → {receipts[rcptIdx+1].centro}</button>
               : <button onClick={()=>setView("cassa")} style={{background:"#15803d",border:"none",color:"#fff",padding:"10px 24px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>➕ Nuovo Ordine</button>
